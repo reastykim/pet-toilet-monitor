@@ -1,0 +1,22 @@
+# Build output
+build/
+build_output.log
+
+# ESP-IDF managed components (downloaded on build)
+managed_components/
+
+# ESP-IDF generated config
+sdkconfig
+sdkconfig.old
+dependencies.lock
+
+# Temp/debug files
+*.log
+json
+st_devices_*.txt
+
+# IDE
+.vscode/
+
+# Claude internal
+.claude/
