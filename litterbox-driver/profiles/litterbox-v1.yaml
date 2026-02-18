@@ -2,8 +2,6 @@ name: litterbox-v1
 components:
   - id: main
     capabilities:
-      - id: temperatureMeasurement
-        version: 1
       - id: carbonDioxideMeasurement
         version: 1
       - id: switch

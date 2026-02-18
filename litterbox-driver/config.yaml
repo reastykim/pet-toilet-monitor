@@ -1,5 +1,5 @@
-name: litterbox-driver-v10
-packageKey: litterbox-driver-v10
+name: litterbox-driver-v11
+packageKey: litterbox-driver-v11
 permissions:
   zigbee: {}
 description: SmartThings Edge Driver for LitterBox.v1 Cat Litter Box Monitor

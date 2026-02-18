@@ -6,7 +6,7 @@
  * LitterBox.v1 - Smart Cat Litter Box Monitoring System
  *
  * Based on ESP Zigbee HA_temperature_sensor example.
- * Clusters: Temperature Measurement (0x0402) + CO₂ Concentration (0x040D) + On/Off (0x0006)
+ * Clusters: CO₂ Concentration (0x040D) + On/Off (0x0006)
  * CO₂ cluster is used to map NH₃ (ammonia) ppm from MQ-135 sensor.
  */
 #include "main.h"
@@ -22,13 +22,6 @@
 #endif
 
 static const char *TAG = "LITTERBOX";
-
-/********************* Helper functions **************************/
-
-static int16_t temperature_to_s16(float temp)
-{
-    return (int16_t)(temp * 100);
-}
 
 /********************* Deferred driver init **********************/
 
@@ -46,29 +39,10 @@ static esp_err_t deferred_driver_init(void)
 
 static void sensor_report_timer_cb(uint8_t param)
 {
-    /* Dummy values - to be replaced by real sensor readings */
-    int16_t temp_value = 2500;    /* 25.00°C */
+    /* Dummy value - to be replaced by real MQ-135 sensor reading */
     float co2_value = 0.00005f;   /* 50 ppm as ZCL fraction (ppm / 1,000,000) */
 
     esp_zb_lock_acquire(portMAX_DELAY);
-
-    /* --- Temperature Report --- */
-    esp_zb_zcl_set_attribute_val(
-        HA_LITTERBOX_ENDPOINT,
-        ESP_ZB_ZCL_CLUSTER_ID_TEMP_MEASUREMENT,
-        ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
-        ESP_ZB_ZCL_ATTR_TEMP_MEASUREMENT_VALUE_ID,
-        &temp_value, false);
-
-    esp_zb_zcl_report_attr_cmd_t temp_report = {0};
-    temp_report.address_mode = ESP_ZB_APS_ADDR_MODE_16_ENDP_PRESENT;
-    temp_report.attributeID = ESP_ZB_ZCL_ATTR_TEMP_MEASUREMENT_VALUE_ID;
-    temp_report.direction = ESP_ZB_ZCL_CMD_DIRECTION_TO_CLI;
-    temp_report.clusterID = ESP_ZB_ZCL_CLUSTER_ID_TEMP_MEASUREMENT;
-    temp_report.zcl_basic_cmd.src_endpoint = HA_LITTERBOX_ENDPOINT;
-    temp_report.zcl_basic_cmd.dst_addr_u.addr_short = 0x0000;
-    temp_report.zcl_basic_cmd.dst_endpoint = 1;
-    esp_zb_zcl_report_attr_cmd_req(&temp_report);
 
     /* --- CO₂ / NH₃ Report --- */
     esp_zb_zcl_set_attribute_val(
@@ -90,8 +64,7 @@ static void sensor_report_timer_cb(uint8_t param)
 
     esp_zb_lock_release();
 
-    ESP_LOGI(TAG, "Reported temp=%.2f C, NH3=%.0f ppm",
-             (float)temp_value / 100.0f, co2_value * 1000000.0f);
+    ESP_LOGI(TAG, "Reported NH3=%.0f ppm", co2_value * 1000000.0f);
 
     /* Re-schedule */
     esp_zb_scheduler_alarm((esp_zb_callback_t)sensor_report_timer_cb, 0, SENSOR_REPORT_INTERVAL_MS);
@@ -204,22 +177,21 @@ static esp_err_t zb_action_handler(esp_zb_core_action_callback_id_t callback_id,
 
 /********************* Cluster creation **************************/
 
-static esp_zb_cluster_list_t *custom_litterbox_clusters_create(esp_zb_temperature_sensor_cfg_t *sensor_cfg)
+static esp_zb_cluster_list_t *custom_litterbox_clusters_create(void)
 {
     esp_zb_cluster_list_t *cluster_list = esp_zb_zcl_cluster_list_create();
 
     /* Basic Cluster with manufacturer info */
-    esp_zb_attribute_list_t *basic_cluster = esp_zb_basic_cluster_create(&(sensor_cfg->basic_cfg));
+    esp_zb_basic_cluster_cfg_t basic_cfg = { .zcl_version = ESP_ZB_ZCL_BASIC_ZCL_VERSION_DEFAULT_VALUE, .power_source = 0x04 /* DC */ };
+    esp_zb_attribute_list_t *basic_cluster = esp_zb_basic_cluster_create(&basic_cfg);
     ESP_ERROR_CHECK(esp_zb_basic_cluster_add_attr(basic_cluster, ESP_ZB_ZCL_ATTR_BASIC_MANUFACTURER_NAME_ID, ESP_MANUFACTURER_NAME));
     ESP_ERROR_CHECK(esp_zb_basic_cluster_add_attr(basic_cluster, ESP_ZB_ZCL_ATTR_BASIC_MODEL_IDENTIFIER_ID, ESP_MODEL_IDENTIFIER));
     ESP_ERROR_CHECK(esp_zb_cluster_list_add_basic_cluster(cluster_list, basic_cluster, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE));
 
-    /* Identify Cluster - server + client roles (matching official temperature sensor example) */
-    ESP_ERROR_CHECK(esp_zb_cluster_list_add_identify_cluster(cluster_list, esp_zb_identify_cluster_create(&(sensor_cfg->identify_cfg)), ESP_ZB_ZCL_CLUSTER_SERVER_ROLE));
+    /* Identify Cluster - server + client roles */
+    esp_zb_identify_cluster_cfg_t identify_cfg = { .identify_time = ESP_ZB_ZCL_IDENTIFY_IDENTIFY_TIME_DEFAULT_VALUE };
+    ESP_ERROR_CHECK(esp_zb_cluster_list_add_identify_cluster(cluster_list, esp_zb_identify_cluster_create(&identify_cfg), ESP_ZB_ZCL_CLUSTER_SERVER_ROLE));
     ESP_ERROR_CHECK(esp_zb_cluster_list_add_identify_cluster(cluster_list, esp_zb_zcl_attr_list_create(ESP_ZB_ZCL_CLUSTER_ID_IDENTIFY), ESP_ZB_ZCL_CLUSTER_CLIENT_ROLE));
-
-    /* Temperature Measurement Cluster */
-    ESP_ERROR_CHECK(esp_zb_cluster_list_add_temperature_meas_cluster(cluster_list, esp_zb_temperature_meas_cluster_create(&(sensor_cfg->temp_meas_cfg)), ESP_ZB_ZCL_CLUSTER_SERVER_ROLE));
 
     /* CO₂ Concentration Measurement Cluster (used to map NH₃ ppm from MQ-135) */
     esp_zb_carbon_dioxide_measurement_cluster_cfg_t co2_cfg = {
@@ -237,16 +209,16 @@ static esp_zb_cluster_list_t *custom_litterbox_clusters_create(esp_zb_temperatur
     return cluster_list;
 }
 
-static esp_zb_ep_list_t *custom_litterbox_ep_create(uint8_t endpoint_id, esp_zb_temperature_sensor_cfg_t *sensor_cfg)
+static esp_zb_ep_list_t *custom_litterbox_ep_create(uint8_t endpoint_id)
 {
     esp_zb_ep_list_t *ep_list = esp_zb_ep_list_create();
     esp_zb_endpoint_config_t endpoint_config = {
         .endpoint = endpoint_id,
         .app_profile_id = ESP_ZB_AF_HA_PROFILE_ID,
-        .app_device_id = ESP_ZB_HA_TEMPERATURE_SENSOR_DEVICE_ID,
+        .app_device_id = ESP_ZB_HA_CUSTOM_ATTR_DEVICE_ID,
         .app_device_version = 0
     };
-    esp_zb_ep_list_add_ep(ep_list, custom_litterbox_clusters_create(sensor_cfg), endpoint_config);
+    esp_zb_ep_list_add_ep(ep_list, custom_litterbox_clusters_create(), endpoint_config);
     return ep_list;
 }
 
@@ -259,30 +231,10 @@ static void esp_zb_task(void *pvParameters)
     esp_zb_init(&zb_nwk_cfg);
 
     /* Create customized LitterBox endpoint */
-    esp_zb_temperature_sensor_cfg_t sensor_cfg = ESP_ZB_DEFAULT_TEMPERATURE_SENSOR_CONFIG();
-    sensor_cfg.temp_meas_cfg.min_value = temperature_to_s16(TEMP_SENSOR_MIN_VALUE);
-    sensor_cfg.temp_meas_cfg.max_value = temperature_to_s16(TEMP_SENSOR_MAX_VALUE);
-    esp_zb_ep_list_t *esp_zb_litterbox_ep = custom_litterbox_ep_create(HA_LITTERBOX_ENDPOINT, &sensor_cfg);
+    esp_zb_ep_list_t *esp_zb_litterbox_ep = custom_litterbox_ep_create(HA_LITTERBOX_ENDPOINT);
 
     /* Register the device */
     esp_zb_device_register(esp_zb_litterbox_ep);
-
-    /* Config the reporting info for temperature (matching official example) */
-    esp_zb_zcl_reporting_info_t reporting_info = {
-        .direction = ESP_ZB_ZCL_CMD_DIRECTION_TO_SRV,
-        .ep = HA_LITTERBOX_ENDPOINT,
-        .cluster_id = ESP_ZB_ZCL_CLUSTER_ID_TEMP_MEASUREMENT,
-        .cluster_role = ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
-        .dst.profile_id = ESP_ZB_AF_HA_PROFILE_ID,
-        .u.send_info.min_interval = 1,
-        .u.send_info.max_interval = 0,
-        .u.send_info.def_min_interval = 1,
-        .u.send_info.def_max_interval = 0,
-        .u.send_info.delta.u16 = 100,
-        .attr_id = ESP_ZB_ZCL_ATTR_TEMP_MEASUREMENT_VALUE_ID,
-        .manuf_code = ESP_ZB_ZCL_ATTR_NON_MANUFACTURER_SPECIFIC,
-    };
-    esp_zb_zcl_update_reporting_info(&reporting_info);
 
     /* Config the reporting info for CO₂ / NH₃ */
     esp_zb_zcl_reporting_info_t co2_reporting_info = {

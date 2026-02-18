@@ -24,10 +24,6 @@
 #define ESP_MANUFACTURER_NAME "\x06""Reasty"         /* 6 bytes: "Reasty" */
 #define ESP_MODEL_IDENTIFIER  "\x0c""LitterBox.v1"   /* 12 bytes: "LitterBox.v1" */
 
-/* Temperature sensor configuration */
-#define TEMP_SENSOR_MIN_VALUE           (-10)   /* Min measured value (degree Celsius) */
-#define TEMP_SENSOR_MAX_VALUE           (80)    /* Max measured value (degree Celsius) */
-
 /* CO₂ / NH₃ sensor configuration (using CO₂ cluster 0x040D to map NH₃ ppm) */
 #define CO2_SENSOR_MIN_MEASURED_VALUE   0.0f    /* Min: 0 ppm as ZCL fraction */
 #define CO2_SENSOR_MAX_MEASURED_VALUE   0.001f  /* Max: 1000 ppm as ZCL fraction */
