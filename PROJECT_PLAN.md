@@ -23,22 +23,25 @@
 ## 전체 Phase 개요
 
 ```
-Phase 1: 개발환경 구축 & 공식 샘플 실행
+Phase 1: 개발환경 구축 & 공식 샘플 실행          ✅ 완료
     └─ HA_on_off_light 예제 → SmartThings 페어링 확인
 
-Phase 2: Zigbee 통신 파이프라인 검증 (표준 클러스터)
+Phase 2: Zigbee 통신 파이프라인 검증 (표준 클러스터) ✅ 완료
     └─ Temperature 클러스터(0x0402) → SmartThings 앱 표시 확인
 
-Phase 3: 센서 데이터 SmartThings 연동 (CO₂ 클러스터 매핑)
+Phase 3: 센서 데이터 SmartThings 연동 (CO₂ 클러스터 매핑) ✅ 완료
     └─ 더미 NH₃값 → CO₂ Cluster(0x040D) → SmartThings 앱 표시 확인
 
-Phase 4: MQ-135 실제 센서 통합
+Phase 4: 커스텀 NH₃ Zigbee 클러스터 검증         ✅ 완료
+    └─ 제조사 특화 클러스터(0xFC00) → Edge Driver v12 → SmartThings 실시간 모니터링
+
+Phase 5: MQ-135 실제 센서 통합                    ← 현재
     └─ ADC 읽기 → 실제 NH₃ ppm 값 → Zigbee 전송
 
-Phase 5: 배뇨/배변 이벤트 감지 로직
+Phase 6: 배뇨/배변 이벤트 감지 로직
     └─ 암모니아 패턴 분석 → 이벤트 분류 → SmartThings 알림
 
-Phase 6: 마무리 & 최적화
+Phase 7: 마무리 & 최적화
     └─ 전력 관리, 코드 정리, 문서화
 ```
 
@@ -306,11 +309,76 @@ driver:run()
 
 ---
 
-## Phase 4: MQ-135 실제 센서 통합
+## Phase 4: 커스텀 NH₃ Zigbee 클러스터 검증
+
+**목표**: CO₂ 클러스터(0x040D) 워크어라운드를 제거하고, 제조사 특화 NH₃ 전용 커스텀 Zigbee 클러스터(0xFC00)를 사용하여 SmartThings까지 end-to-end 데이터 전달 검증
+
+> **왜 이 단계가 필요한가?**
+> - CO₂ 클러스터(0x040D)는 NH₃ 데이터를 표현하기 위한 임시 방편 (의미적으로 부정확)
+> - ZCL 표준에 NH₃ 전용 클러스터가 없으므로, 제조사 특화 클러스터로 올바르게 정의
+> - 실제 센서 통합(Phase 5) 전에 커스텀 클러스터 통신이 동작하는지 먼저 검증
+> - float fraction(0.0~1.0) → uint16 ppm 직접 표현으로 단위 변환 단순화
+
+### 4-1. 커스텀 NH₃ 클러스터 설계
+
+| 항목 | 값 |
+|------|-----|
+| Cluster ID | `0xFC00` (Manufacturer-Specific range) |
+| Attribute 0x0000 | NH₃ Measured Value (uint16, ppm) |
+| Attribute 0x0001 | Min Measured Value (uint16, ppm, 기본값 0) |
+| Attribute 0x0002 | Max Measured Value (uint16, ppm, 기본값 1000) |
+
+> ZCL 표준 Concentration Measurement 클러스터(0x040C~0x042B)와 동일한 attribute 구조를 따르되,
+> float fraction 대신 uint16 ppm을 직접 사용하여 단순화.
+
+### 4-2. 펌웨어 수정 (main.h, main.c)
+
+- [x] `main.h`에 커스텀 클러스터 상수 추가 (`NH3_CUSTOM_CLUSTER_ID=0xFC00`, uint16 ppm)
+- [x] CO₂ 클러스터(0x040D) 제거 → 커스텀 NH₃ 클러스터(0xFC00) 추가
+  - `esp_zb_custom_cluster_add_custom_attr()` + `esp_zb_cluster_list_add_custom_cluster()` 사용
+- [x] 타이머 콜백에서 uint16 ppm 직접 전송 (`esp_zb_zcl_report_attr_cmd_req()` 수동 호출)
+- [x] **`esp_zb_zcl_update_reporting_info()` 제거** (커스텀 클러스터에 사용 시 crash 발생)
+- [x] 빌드 & 플래시 완료
+- [x] 시리얼 로그 확인: `Reported NH3=50 ppm (custom cluster 0xFC00)` 출력
+
+> **⚠️ 주의**: `esp_zb_zcl_update_reporting_info()`를 커스텀 클러스터(0xFC00~0xFFFF)에 사용하면
+> `zcl_general_commands.c:612`에서 assertion crash 발생. 커스텀 클러스터는 반드시 수동 타이머 방식 사용.
+
+> **⚠️ 주의**: 클러스터 ID 변경(0x040D→0xFC00) 후 **Zigbee NVS 반드시 초기화** 필요.
+> 이전 reporting config가 NVS에 남아 재부팅 시 crash 유발.
+> ```powershell
+> & $esptool --port COM3 --baud 460800 erase_region 0xF1000 0x5000
+> ```
+
+### 4-3. SmartThings Edge Driver 수정 (v12)
+
+- [x] `config.yaml`: `packageKey` → `litterbox-driver-v12`
+- [x] `profiles/litterbox-v1.yaml`: `carbonDioxideMeasurement` → `tvocMeasurement`
+  - NH₃는 기술적으로 VOC가 아니지만, `tvocMeasurement`가 `carbonDioxideMeasurement`보다 의미적으로 더 적합
+  - 두 capability 모두 1h/24h/31d 그래프 지원
+- [x] `src/init.lua`: `zigbee_handlers.attr[0xFC00][0x0000]` 핸들러, `tvocMeasurement.tvocLevel()` emit
+- [x] 새 드라이버(v12) 패키징 & 허브 배포 완료
+
+### 4-4. 검증
+
+- [x] Edge Driver logcat에서 0xFC00 클러스터 수신 확인
+  ```
+  INFO litterbox-driver-v12  NH3: 50 ppm (cluster 0xFC00)
+  INFO litterbox-driver-v12  emitting event: tvocLevel value=50 unit=ppm
+  ```
+- [x] SmartThings 앱에서 NH₃ 50 ppm 실시간 표시 (10초 간격) 확인
+- [x] tvocMeasurement 그래프 뷰 (1h/24h/31d) 지원 확인
+- [x] 재부팅 후 자동 재연결 및 데이터 송신 확인
+
+**✅ Phase 4 완료 조건**: 커스텀 클러스터(0xFC00)로 전송한 NH₃ ppm 값이 SmartThings 앱에서 실시간으로 표시됨
+
+---
+
+## Phase 5: MQ-135 실제 센서 통합
 
 **목표**: MQ-135 센서를 ADC로 읽어 실제 NH₃ ppm 값을 Zigbee로 전송
 
-### 4-1. 파일 구조 확장
+### 5-1. 파일 구조 확장
 
 ```
 project/
@@ -324,7 +392,7 @@ project/
 │   └── CMakeLists.txt
 ```
 
-### 4-2. 센서 추상화 헤더 (`air_sensor_driver.h`)
+### 5-2. 센서 추상화 헤더 (`air_sensor_driver.h`)
 
 ```c
 #pragma once
@@ -343,7 +411,7 @@ esp_err_t air_sensor_init(void);
 esp_err_t air_sensor_read(air_sensor_data_t *data);
 ```
 
-### 4-3. MQ-135 드라이버 (`air_sensor_driver_MQ135.c`)
+### 5-3. MQ-135 드라이버 (`air_sensor_driver_MQ135.c`)
 
 - [ ] ADC1 초기화 (Oneshot API, ESP-IDF v5.5.2)
 
@@ -377,31 +445,31 @@ esp_err_t air_sensor_read(air_sensor_data_t *data);
 - [ ] 웜업 대기 시간 처리 (MQ-135: 최소 20초)
 - [ ] `air_sensor_read()` 함수 완성
 
-### 4-4. 센서 데이터 Zigbee 전송 통합
+### 5-4. 센서 데이터 Zigbee 전송 통합
 
 - [ ] `main.c`에서 10초 타이머로 `air_sensor_read()` 호출
-- [ ] 읽은 NH₃ ppm을 CO₂ Cluster(0x040D)로 전송
+- [ ] 읽은 NH₃ ppm을 커스텀 NH₃ Cluster(0xFC00)로 전송 (Phase 4에서 구축된 파이프라인 활용)
 - [ ] 시리얼 로그로 ppm 값 확인
   ```
-  I (xxx) LitterBox: NH3: 15.3 ppm → ZCL: 0.0000153
+  I (xxx) LitterBox: NH3: 15 ppm (raw ADC: 2048)
   ```
 - [ ] SmartThings 앱에서 실시간 값 변화 확인
 
-### 4-5. MQ-135 캘리브레이션
+### 5-5. MQ-135 캘리브레이션
 
 - [ ] 신선한 공기에서 R0 측정 (20분 이상 안정화 후)
 - [ ] `R0_NH3` 상수 코드에 적용
 - [ ] 암모니아 발생 환경(화장실 근처)에서 값 변화 확인
 
-**✅ Phase 4 완료 조건**: MQ-135로 읽은 실제 NH₃ 값이 SmartThings 앱에서 10초 간격으로 업데이트됨
+**✅ Phase 5 완료 조건**: MQ-135로 읽은 실제 NH₃ 값이 SmartThings 앱에서 10초 간격으로 업데이트됨
 
 ---
 
-## Phase 5: 배뇨/배변 이벤트 감지 로직
+## Phase 6: 배뇨/배변 이벤트 감지 로직
 
 **목표**: NH₃ 농도 패턴으로 배뇨/배변을 구분하여 SmartThings 알림 전송
 
-### 5-1. 감지 알고리즘 설계
+### 6-1. 감지 알고리즘 설계
 
 ```
 배뇨 특징:
@@ -415,7 +483,7 @@ esp_err_t air_sensor_read(air_sensor_data_t *data);
   - 지속시간: 1~5분
 ```
 
-### 5-2. 이벤트 감지 파일 추가
+### 6-2. 이벤트 감지 파일 추가
 
 ```
 project/
@@ -448,27 +516,27 @@ project/
 - [ ] `event_detector.c` — 상승률/패턴 기반 분류 로직 구현
 - [ ] 이벤트 발생 시 SmartThings에 별도 Attribute로 전송 검토
 
-### 5-3. SmartThings 알림 연동
+### 6-3. SmartThings 알림 연동
 
 - [ ] SmartThings Automation으로 이벤트 감지 시 앱 알림 설정
 - [ ] Edge Driver에 이벤트 Attribute 핸들러 추가
 
-**✅ Phase 5 완료 조건**: 실제 화장실 사용 시 배뇨/배변 이벤트가 SmartThings 앱 알림으로 수신됨
+**✅ Phase 6 완료 조건**: 실제 화장실 사용 시 배뇨/배변 이벤트가 SmartThings 앱 알림으로 수신됨
 
 ---
 
-## Phase 6: 마무리 & 최적화
+## Phase 7: 마무리 & 최적화
 
 **목표**: 코드 품질 개선, 전력 최적화, 문서화
 
-### 6-1. LED 상태 표시 정리
+### 7-1. LED 상태 표시 정리
 
 - [ ] 이벤트 감지 시 LED 패턴으로 상태 표시
   - 대기 중: LED OFF
   - 이벤트 감지 중: LED 느리게 점멸
   - 배뇨 감지: LED 빠르게 점멸 후 OFF
 
-### 6-2. 코드 정리
+### 7-2. 코드 정리
 
 - [ ] 미사용 코드 제거 (HA_on_off_light 잔재)
 - [ ] 상수값 헤더로 분리 (`config.h`)
@@ -480,19 +548,19 @@ project/
   ```
 - [ ] 주요 함수 Doxygen 스타일 주석 추가
 
-### 6-3. 안정성 강화
+### 7-3. 안정성 강화
 
 - [ ] Zigbee 재연결 처리 (허브 재시작 시 자동 재페어링)
 - [ ] 센서 읽기 실패 시 재시도 로직
 - [ ] WDT(Watchdog) 설정
 
-### 6-4. CLAUDE.md 최종 업데이트
+### 7-4. CLAUDE.md 최종 업데이트
 
 - [ ] 완성된 파일 구조 반영
 - [ ] 캘리브레이션 값 기록
 - [ ] 알려진 이슈 및 해결 방법 기록
 
-**✅ Phase 6 완료 조건**: 48시간 연속 동작 안정성 확인
+**✅ Phase 7 완료 조건**: 48시간 연속 동작 안정성 확인
 
 ---
 
@@ -526,13 +594,11 @@ smartthings edge:drivers:logcat --hub <HUB_ID>
 ### 핵심 ZCL 단위 변환 공식
 
 ```
-[ESP32 → Zigbee 전송]
-CO₂ Cluster (0x040D): float = ppm / 1,000,000
-Temperature Cluster (0x0402): int16 = celsius × 100
+[현재 방식 - Phase 4 완료]
+NH₃ Custom Cluster (0xFC00): uint16 = ppm (직접)  (50 ppm → 50)
 
 [Zigbee → SmartThings Capability]
-carbonDioxideMeasurement: ppm = float × 1,000,000 (정수 변환)
-temperatureMeasurement: celsius = int16 / 100
+tvocMeasurement.tvocLevel: ppm = uint16 (변환 불필요)
 ```
 
 ---
@@ -552,5 +618,6 @@ temperatureMeasurement: celsius = int16 / 100
 
 ---
 
-_작성일: 2026-02-18_  
-_버전: v1.0_
+_작성일: 2026-02-18_
+_최종 업데이트: 2026-02-19 (Phase 4 완료)_
+_버전: v1.1_

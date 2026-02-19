@@ -79,29 +79,28 @@ pet-toilet-monitor_v2/
 
 ---
 
-## 현재 구현 상태 (Phase 2 완료 - SmartThings 연동 성공)
+## 현재 구현 상태 (Phase 4 완료 - 커스텀 NH₃ 클러스터 0xFC00 SmartThings 연동 검증)
 
-### Phase 2 (완료)
+### Phase 1~4 (완료)
 
 - [x] 프로젝트 독립화 (예제에서 분리, EXTRA_COMPONENT_DIRS 제거)
 - [x] GPIO15 LED 드라이버 (Active-Low, WS2812 대신 직접 GPIO 제어)
 - [x] 디바이스 정보: Reasty / LitterBox.v1 (ZCL 문자열 포맷)
-- [x] Temperature Measurement 클러스터 (0x0402) 추가
+- [x] SmartThings Hub 페어링 성공 (Endpoint 1)
+- [x] CO₂ 클러스터(0x040D)로 더미 NH₃ 50 ppm 전송 검증 (Phase 3)
 - [x] On/Off 클러스터 유지 (LED 원격 제어)
-- [x] 더미 온도 25°C/27°C 교대 10초 주기 보고
-- [x] Reporting Info 설정 (delta: 1.00°C)
-- [x] SmartThings Hub 페어링 성공
-- [x] SmartThings Edge Driver v9 배포 및 동작 확인
-- [x] SmartThings 앱에서 온도값 정상 표시 (25°C ↔ 27°C)
+- [x] 커스텀 NH₃ 클러스터 (0xFC00, uint16 ppm 직접) 구현
+- [x] Edge Driver v12: 0xFC00 핸들러 + tvocMeasurement capability
+- [x] SmartThings 앱에서 NH₃ 50 ppm 실시간 표시 (10초 간격)
+- [x] tvocMeasurement 그래프 뷰 (1h/24h/31d) 지원 확인
 - [x] 디바이스 상태: PROVISIONED (정상)
 
 ### 미완료 (다음 Phase)
 
-- [ ] CO₂ 클러스터 (0x040D) 복원 (디버깅 중 제거됨)
-- [ ] MQ-135 센서 ADC 통합 (air_sensor_driver_MQ135.c)
-- [ ] 암모니아 기준선 캘리브레이션
-- [ ] 배뇨/배변 이벤트 감지 알고리즘
-- [ ] 전력 관리 (Deep Sleep)
+- [ ] **[Phase 5]** MQ-135 센서 ADC 통합 (air_sensor_driver_MQ135.c)
+- [ ] **[Phase 5]** 암모니아 기준선 캘리브레이션
+- [ ] **[Phase 6]** 배뇨/배변 이벤트 감지 알고리즘
+- [ ] **[Phase 7]** 전력 관리 (Deep Sleep)
 
 ---
 
@@ -124,27 +123,26 @@ pet-toilet-monitor_v2/
 
 ## Zigbee 클러스터 구성
 
+### 현재 (Phase 4 완료 상태)
+
 | 클러스터 | ID | 역할 | 용도 |
 |----------|--------|--------|------|
 | Basic | 0x0000 | Server | 제조사/모델 정보 |
 | Identify | 0x0003 | Server | 디바이스 식별 |
-| Temperature Measurement | 0x0402 | Server | 센서값 보고 (현재 더미 25°C) |
-| CO₂ Concentration | 0x040D | Server | NH₃ ppm 매핑 (현재 더미 50 ppm) |
+| NH₃ Custom | 0xFC00 | Server | NH₃ ppm 직접 표현 (uint16, ppm) |
 | On/Off | 0x0006 | Server | LED 원격 제어 |
 
 - **Endpoint**: 1 (`HA_LITTERBOX_ENDPOINT`) - SmartThings는 endpoint 1을 기대함
-- **Device ID**: `ESP_ZB_HA_TEMPERATURE_SENSOR_DEVICE_ID`
+- **Device ID**: `ESP_ZB_HA_CUSTOM_ATTR_DEVICE_ID`
 - **ZCL 문자열 포맷**: 길이 바이트 + 문자열 (예: `"\x06""Reasty"`)
-- **CO₂ 클러스터**: 현재 디버깅을 위해 제거됨 (Phase 3에서 복원 예정)
 
 ### ZCL 단위 변환
 
 ```
-Temperature (0x0402): int16 = celsius × 100      (25.00°C → 2500)
-CO₂ (0x040D):        float = ppm / 1,000,000    (50 ppm → 0.00005f)
+NH₃ Custom (0xFC00):  uint16 = ppm (직접)          (50 ppm → 50)
 ```
 
-### SmartThings Edge Driver (v9)
+### SmartThings Edge Driver (v12)
 
 `litterbox-driver/` 디렉토리에 위치. 배포 방법:
 ```powershell
@@ -164,8 +162,8 @@ smartthings edge:drivers:uninstall <driverId> --hub <hubId>
 ```
 
 #### 현재 SmartThings ID
-- **Device**: `7466c74f-cd28-44af-b199-db803fd6e4b4`
-- **Driver (v9)**: `07fa2cca-ab5b-4b0b-9b35-159f0941bafc`
+- **Device**: `e53f467e-54fb-434e-9a96-3d18f7ea299e`
+- **Driver (v12)**: `45c88770-8bb4-4771-bfb1-2b3641780b7e`
 - **Channel**: `30e3213f-f924-4f19-964c-fe44c2a09496`
 - **Hub**: `7a93da67-817b-4a20-ad71-f46e023a1992` (IP: `192.168.10.60`)
 
@@ -235,6 +233,52 @@ SmartThings Edge Driver의 `config.yaml`에 Zigbee 권한 선언이 없으면,
 
 ---
 
+### 문제: 커스텀 클러스터(0xFC00)에서 크래시 루프
+
+**증상 (Phase 4 디버깅 중 발견)**:
+- 펌웨어 플래시 후 디바이스가 네트워크 참여 직후 크래시 + 재부팅 반복
+- `Zigbee stack assertion failed zcl/zcl_general_commands.c:612`
+- 스택 덤프에 `0x0000040d` (이전 CO₂ 클러스터 ID) 포함
+
+**근본 원인 1**: `esp_zb_zcl_update_reporting_info()` for custom cluster (0xFC00)
+
+`esp_zb_zcl_update_reporting_info()`를 custom/manufacturer-specific cluster에 사용하면
+ZCL 내부 리포팅 타이머가 해당 클러스터를 처리하려다 crash. 커스텀 클러스터는
+ZCL 스택에 알려지지 않으므로 지원되지 않는다.
+
+**해결**: `esp_zb_zcl_update_reporting_info()` 완전히 제거. 대신 `esp_zb_scheduler_alarm()`으로
+수동 타이머를 만들어 `esp_zb_zcl_report_attr_cmd_req()`를 직접 호출.
+
+```c
+/* ❌ 이렇게 하면 custom cluster에서 crash */
+// esp_zb_zcl_update_reporting_info(&reporting_info);
+
+/* ✅ 이렇게 수동으로 타이머 + 직접 리포트 */
+esp_zb_scheduler_alarm((esp_zb_callback_t)sensor_report_timer_cb, 0, INTERVAL_MS);
+// timer callback에서:
+esp_zb_zcl_report_attr_cmd_req(&nh3_report);
+```
+
+**근본 원인 2**: NVS에 저장된 이전 클러스터(0x040D) 리포팅 설정
+
+Zigbee NVS(`zb_storage` 파티션)는 ZCL 리포팅 설정을 영속 저장한다. 클러스터를 변경하면
+이전 클러스터의 설정이 남아있고, 재부팅 시 존재하지 않는 클러스터를 처리하려다 crash.
+
+**해결**: esptool로 Zigbee NVS 파티션 초기화 후 재페어링
+
+```powershell
+# partitions.csv에서 zb_storage(0xF1000, 0x5000) + zb_fct(0xF5000) 확인
+& $esptool --port COM3 --baud 460800 erase_region 0xF1000 0x5000
+# 이후 디바이스가 factory-new 모드로 부팅 → SmartThings 앱에서 재페어링
+```
+
+**핵심 교훈**:
+1. **커스텀 클러스터에 `esp_zb_zcl_update_reporting_info()` 절대 사용 금지** - crash 유발
+2. **클러스터 ID 변경 시 반드시 Zigbee NVS 초기화** - 잔류 설정이 crash 유발
+3. **재페어링 후 SmartThings가 fingerprint 불일치로 엉뚱한 드라이버 할당할 수 있음** → `smartthings edge:drivers:switch --include-non-matching` 사용
+
+---
+
 ## 코드 컨벤션
 
 - ESP-IDF 코딩 스타일 준수
@@ -256,4 +300,4 @@ SmartThings Edge Driver의 `config.yaml`에 Zigbee 권한 선언이 없으면,
 
 ---
 
-_Last Updated: 2026-02-18 (Phase 2 완료, SmartThings 온도 리포트 동작 확인)_
+_Last Updated: 2026-02-19 (Phase 4 완료, 커스텀 NH₃ 클러스터 0xFC00 SmartThings 연동 검증)_

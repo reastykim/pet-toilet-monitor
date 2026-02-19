@@ -12,6 +12,7 @@
 #include "esp_zigbee_core.h"
 #include "light_driver.h"
 #include "zcl_utility.h"
+#include "air_sensor_driver.h"
 
 /* Zigbee configuration */
 #define INSTALLCODE_POLICY_ENABLE       false   /* enable the install code policy for security */
@@ -24,9 +25,17 @@
 #define ESP_MANUFACTURER_NAME "\x06""Reasty"         /* 6 bytes: "Reasty" */
 #define ESP_MODEL_IDENTIFIER  "\x0c""LitterBox.v1"   /* 12 bytes: "LitterBox.v1" */
 
-/* CO₂ / NH₃ sensor configuration (using CO₂ cluster 0x040D to map NH₃ ppm) */
-#define CO2_SENSOR_MIN_MEASURED_VALUE   0.0f    /* Min: 0 ppm as ZCL fraction */
-#define CO2_SENSOR_MAX_MEASURED_VALUE   0.001f  /* Max: 1000 ppm as ZCL fraction */
+/* Custom NH₃ Concentration Measurement Cluster (Manufacturer-Specific, 0xFC00)
+ * ZCL has no standard cluster for NH₃. Using manufacturer-specific cluster
+ * with uint16 ppm directly (simpler than CO₂ cluster float fraction approach).
+ */
+#define NH3_CUSTOM_CLUSTER_ID           0xFC00  /* Manufacturer-specific cluster */
+#define NH3_ATTR_MEASURED_VALUE_ID      0x0000  /* Measured value: uint16, ppm */
+#define NH3_ATTR_MIN_MEASURED_VALUE_ID  0x0001  /* Min measurable: uint16, ppm */
+#define NH3_ATTR_MAX_MEASURED_VALUE_ID  0x0002  /* Max measurable: uint16, ppm */
+#define NH3_DEFAULT_PPM                 0       /* Fallback when sensor read fails */
+#define NH3_MIN_PPM                     0
+#define NH3_MAX_PPM                     1000
 
 /* Sensor report interval */
 #define SENSOR_REPORT_INTERVAL_MS       10000   /* Report interval: 10 seconds */

@@ -6,8 +6,8 @@
  * LitterBox.v1 - Smart Cat Litter Box Monitoring System
  *
  * Based on ESP Zigbee HA_temperature_sensor example.
- * Clusters: CO₂ Concentration (0x040D) + On/Off (0x0006)
- * CO₂ cluster is used to map NH₃ (ammonia) ppm from MQ-135 sensor.
+ * Clusters: Custom NH₃ Concentration (0xFC00) + On/Off (0x0006)
+ * Custom manufacturer-specific cluster reports NH₃ ppm as uint16 directly.
  */
 #include "main.h"
 #include "esp_check.h"
@@ -30,6 +30,10 @@ static esp_err_t deferred_driver_init(void)
     static bool is_inited = false;
     if (!is_inited) {
         light_driver_init(LIGHT_DEFAULT_OFF);
+        esp_err_t ret = air_sensor_init();
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Air sensor init failed (%s) — will use fallback value", esp_err_to_name(ret));
+        }
         is_inited = true;
     }
     return is_inited ? ESP_OK : ESP_FAIL;
@@ -39,32 +43,45 @@ static esp_err_t deferred_driver_init(void)
 
 static void sensor_report_timer_cb(uint8_t param)
 {
-    /* Dummy value - to be replaced by real MQ-135 sensor reading */
-    float co2_value = 0.00005f;   /* 50 ppm as ZCL fraction (ppm / 1,000,000) */
+    /* Read NH₃ concentration from MQ-135 sensor */
+    air_sensor_data_t sensor = {0};
+    uint16_t nh3_ppm;
+
+    if (air_sensor_read(&sensor) == ESP_OK && sensor.is_valid) {
+        nh3_ppm = sensor.nh3_ppm;
+        if (sensor.is_warming_up) {
+            ESP_LOGI(TAG, "Sensor warming up (raw=%"PRIu32"), NH3=%u ppm (unreliable)",
+                     sensor.raw_adc, nh3_ppm);
+        }
+    } else {
+        nh3_ppm = NH3_DEFAULT_PPM;
+        ESP_LOGW(TAG, "Sensor read failed — reporting fallback: %u ppm", nh3_ppm);
+    }
 
     esp_zb_lock_acquire(portMAX_DELAY);
 
-    /* --- CO₂ / NH₃ Report --- */
+    /* --- NH₃ Report (custom cluster 0xFC00) --- */
     esp_zb_zcl_set_attribute_val(
         HA_LITTERBOX_ENDPOINT,
-        ESP_ZB_ZCL_CLUSTER_ID_CARBON_DIOXIDE_MEASUREMENT,
+        NH3_CUSTOM_CLUSTER_ID,
         ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
-        ESP_ZB_ZCL_ATTR_CARBON_DIOXIDE_MEASUREMENT_MEASURED_VALUE_ID,
-        &co2_value, false);
+        NH3_ATTR_MEASURED_VALUE_ID,
+        &nh3_ppm, false);
 
-    esp_zb_zcl_report_attr_cmd_t co2_report = {0};
-    co2_report.address_mode = ESP_ZB_APS_ADDR_MODE_16_ENDP_PRESENT;
-    co2_report.attributeID = ESP_ZB_ZCL_ATTR_CARBON_DIOXIDE_MEASUREMENT_MEASURED_VALUE_ID;
-    co2_report.direction = ESP_ZB_ZCL_CMD_DIRECTION_TO_CLI;
-    co2_report.clusterID = ESP_ZB_ZCL_CLUSTER_ID_CARBON_DIOXIDE_MEASUREMENT;
-    co2_report.zcl_basic_cmd.src_endpoint = HA_LITTERBOX_ENDPOINT;
-    co2_report.zcl_basic_cmd.dst_addr_u.addr_short = 0x0000;
-    co2_report.zcl_basic_cmd.dst_endpoint = 1;
-    esp_zb_zcl_report_attr_cmd_req(&co2_report);
+    esp_zb_zcl_report_attr_cmd_t nh3_report = {0};
+    nh3_report.address_mode = ESP_ZB_APS_ADDR_MODE_16_ENDP_PRESENT;
+    nh3_report.attributeID = NH3_ATTR_MEASURED_VALUE_ID;
+    nh3_report.direction = ESP_ZB_ZCL_CMD_DIRECTION_TO_CLI;
+    nh3_report.clusterID = NH3_CUSTOM_CLUSTER_ID;
+    nh3_report.zcl_basic_cmd.src_endpoint = HA_LITTERBOX_ENDPOINT;
+    nh3_report.zcl_basic_cmd.dst_addr_u.addr_short = 0x0000;
+    nh3_report.zcl_basic_cmd.dst_endpoint = 1;
+    esp_zb_zcl_report_attr_cmd_req(&nh3_report);
 
     esp_zb_lock_release();
 
-    ESP_LOGI(TAG, "Reported NH3=%.0f ppm", co2_value * 1000000.0f);
+    ESP_LOGI(TAG, "Reported NH3=%u ppm (custom cluster 0x%04X, raw=%"PRIu32")",
+             nh3_ppm, NH3_CUSTOM_CLUSTER_ID, sensor.raw_adc);
 
     /* Re-schedule */
     esp_zb_scheduler_alarm((esp_zb_callback_t)sensor_report_timer_cb, 0, SENSOR_REPORT_INTERVAL_MS);
@@ -193,14 +210,26 @@ static esp_zb_cluster_list_t *custom_litterbox_clusters_create(void)
     ESP_ERROR_CHECK(esp_zb_cluster_list_add_identify_cluster(cluster_list, esp_zb_identify_cluster_create(&identify_cfg), ESP_ZB_ZCL_CLUSTER_SERVER_ROLE));
     ESP_ERROR_CHECK(esp_zb_cluster_list_add_identify_cluster(cluster_list, esp_zb_zcl_attr_list_create(ESP_ZB_ZCL_CLUSTER_ID_IDENTIFY), ESP_ZB_ZCL_CLUSTER_CLIENT_ROLE));
 
-    /* CO₂ Concentration Measurement Cluster (used to map NH₃ ppm from MQ-135) */
-    esp_zb_carbon_dioxide_measurement_cluster_cfg_t co2_cfg = {
-        .measured_value = 0.0f,
-        .min_measured_value = CO2_SENSOR_MIN_MEASURED_VALUE,
-        .max_measured_value = CO2_SENSOR_MAX_MEASURED_VALUE,
-    };
-    ESP_ERROR_CHECK(esp_zb_cluster_list_add_carbon_dioxide_measurement_cluster(cluster_list,
-        esp_zb_carbon_dioxide_measurement_cluster_create(&co2_cfg), ESP_ZB_ZCL_CLUSTER_SERVER_ROLE));
+    /* Custom NH₃ Concentration Measurement Cluster (0xFC00, Manufacturer-Specific)
+     * Uses uint16 ppm directly instead of CO₂ cluster's float fraction (0.0~1.0).
+     * Attributes mirror ZCL Concentration Measurement structure (0x040C~0x042B). */
+    uint16_t nh3_measured = NH3_DEFAULT_PPM;
+    uint16_t nh3_min = NH3_MIN_PPM;
+    uint16_t nh3_max = NH3_MAX_PPM;
+    esp_zb_attribute_list_t *nh3_cluster = esp_zb_zcl_attr_list_create(NH3_CUSTOM_CLUSTER_ID);
+    ESP_ERROR_CHECK(esp_zb_custom_cluster_add_custom_attr(nh3_cluster,
+        NH3_ATTR_MEASURED_VALUE_ID, ESP_ZB_ZCL_ATTR_TYPE_U16,
+        ESP_ZB_ZCL_ATTR_ACCESS_READ_ONLY | ESP_ZB_ZCL_ATTR_ACCESS_REPORTING,
+        &nh3_measured));
+    ESP_ERROR_CHECK(esp_zb_custom_cluster_add_custom_attr(nh3_cluster,
+        NH3_ATTR_MIN_MEASURED_VALUE_ID, ESP_ZB_ZCL_ATTR_TYPE_U16,
+        ESP_ZB_ZCL_ATTR_ACCESS_READ_ONLY,
+        &nh3_min));
+    ESP_ERROR_CHECK(esp_zb_custom_cluster_add_custom_attr(nh3_cluster,
+        NH3_ATTR_MAX_MEASURED_VALUE_ID, ESP_ZB_ZCL_ATTR_TYPE_U16,
+        ESP_ZB_ZCL_ATTR_ACCESS_READ_ONLY,
+        &nh3_max));
+    ESP_ERROR_CHECK(esp_zb_cluster_list_add_custom_cluster(cluster_list, nh3_cluster, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE));
 
     /* On/Off Cluster (for LED control) */
     esp_zb_on_off_cluster_cfg_t on_off_cfg = { .on_off = false };
@@ -236,21 +265,10 @@ static void esp_zb_task(void *pvParameters)
     /* Register the device */
     esp_zb_device_register(esp_zb_litterbox_ep);
 
-    /* Config the reporting info for CO₂ / NH₃ */
-    esp_zb_zcl_reporting_info_t co2_reporting_info = {
-        .direction = ESP_ZB_ZCL_CMD_DIRECTION_TO_SRV,
-        .ep = HA_LITTERBOX_ENDPOINT,
-        .cluster_id = ESP_ZB_ZCL_CLUSTER_ID_CARBON_DIOXIDE_MEASUREMENT,
-        .cluster_role = ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
-        .dst.profile_id = ESP_ZB_AF_HA_PROFILE_ID,
-        .u.send_info.min_interval = 1,
-        .u.send_info.max_interval = 0,
-        .u.send_info.def_min_interval = 1,
-        .u.send_info.def_max_interval = 0,
-        .attr_id = ESP_ZB_ZCL_ATTR_CARBON_DIOXIDE_MEASUREMENT_MEASURED_VALUE_ID,
-        .manuf_code = ESP_ZB_ZCL_ATTR_NON_MANUFACTURER_SPECIFIC,
-    };
-    esp_zb_zcl_update_reporting_info(&co2_reporting_info);
+    /* Note: esp_zb_zcl_update_reporting_info() is NOT used for the custom NH₃ cluster
+     * (0xFC00) because the ZCL stack's internal reporting mechanism does not support
+     * manufacturer-specific clusters and will crash. Instead, reports are sent manually
+     * via esp_zb_zcl_report_attr_cmd_req() in sensor_report_timer_cb(). */
 
     /* Register action handler */
     esp_zb_core_action_handler_register(zb_action_handler);

@@ -145,58 +145,176 @@ Rs = RL × ((VCC / Vout) - 1)
 |------|-----|
 | 해상도 | 12비트 (0~4095) |
 | ADC 유닛 | ADC1 (ESP32-C6에는 ADC1만 사용 가능) |
-| 감쇄 | `ADC_ATTEN_DB_12` → 최대 약 **2450mV** |
+| 감쇄 | `ADC_ATTEN_DB_12` → 최대 약 **3100mV** |
 | API | ADC Oneshot (ESP-IDF v5.5.2) |
 
 #### XIAO ESP32-C6 ADC 핀 매핑
 
-| XIAO 핀 | GPIO | ADC 채널 |
-|---------|------|---------|
-| D0/A0 | GPIO0 | ADC1_CH0 |
-| D1/A1 | GPIO1 | ADC1_CH1 |
-| D2/A2 | GPIO2 | ADC1_CH2 |
+> XIAO 보드의 실크 라벨 기준. XIAO ESP32-C6의 A0 핀이 칩의 GPIO2에 연결됨.
 
-**권장**: A0 (GPIO0 / ADC1_CHANNEL_0)
+| XIAO 보드 핀 | 칩 GPIO | ADC 채널 |
+|-------------|---------|---------|
+| **A0** | **GPIO2** | **ADC1_CH2** ← 현재 사용 |
+| A1 | GPIO3 | ADC1_CH3 |
+| A2 | GPIO4 | ADC1_CH4 |
 
-#### 전압 레벨 문제 — 중요
+**핀아웃 참고 이미지**: [Seeed Studio XIAO ESP32-C6 Getting Started](https://wiki.seeedstudio.com/xiao_esp32c6_getting_started/) — 페이지 중간의 "Pin Out" 섹션
 
-MQ-135 아날로그 출력: **0~5V**
-ESP32-C6 ADC 최대: **~2450mV** (ADC_ATTEN_DB_12)
+---
 
-**반드시 전압 분배기 필요**:
+## 하드웨어 연결 (초보자 가이드)
+
+> **전자공학 지식이 없어도 따라할 수 있는 단계별 연결 방법**
+
+### 필요 부품
+
+- Seeed XIAO ESP32-C6 보드
+- MQ-135 모듈 (breakout board, 4핀 버전)
+- 점퍼 케이블 (Female-to-Female, 3개)
+- USB-C 케이블 (XIAO에 전원 공급)
+
+### MQ-135 모듈 핀 확인
+
+MQ-135 모듈 뒷면 또는 PCB에 아래 4개 핀이 있습니다:
 
 ```
-MQ-135 AO ---[R1 = 270kΩ]---+---→ ESP32-C6 A0 (GPIO0)
-                             |
-                          [R2 = 220kΩ]
-                             |
-                            GND
+┌─────────────────────────┐
+│  ●센서 돔●              │
+│                         │
+│  [VCC] [GND] [DO] [AO]  │
+└─────────────────────────┘
+
+VCC : 전원 (+)
+GND : 접지 (-)
+DO  : 디지털 출력 (이 프로젝트에서는 사용 안 함)
+AO  : 아날로그 출력 ← 이것을 ESP32에 연결
+```
+
+### 방법 A: 3.3V 직결 (권장 — 가장 간단)
+
+MQ-135를 **3.3V로 구동**하면 전압 분배기 없이 바로 연결할 수 있습니다.
+(히터 성능이 약간 저하되지만 암모니아 스파이크 감지에는 충분합니다)
+
+#### 연결 테이블
+
+| MQ-135 핀 | XIAO ESP32-C6 핀 | 케이블 색 (권장) |
+|----------|-----------------|----------------|
+| VCC | 3V3 | 빨간색 |
+| GND | GND | 검정색 |
+| AO | A0 | 노란색 |
+| DO | 연결 안 함 | — |
+
+#### 배선도
+
+```
+XIAO ESP32-C6                    MQ-135 모듈
+┌─────────────┐                ┌──────────────┐
+│             │                │  ┌─────────┐ │
+│         3V3 │━━━━━━━━━━━━━━━━│VCC│         │ │
+│             │                │  └─────────┘ │
+│         GND │━━━━━━━━━━━━━━━━│GND│         │ │
+│             │                │  └─────────┘ │
+│          A0 │━━━━━━━━━━━━━━━━│ AO│         │ │
+│  (GPIO2)    │                │  └─────────┘ │
+│             │                │           DO │ (연결 안 함)
+└─────────────┘                └──────────────┘
+```
+
+#### XIAO 보드에서 핀 위치 찾기
+
+```
+XIAO ESP32-C6 상단면 (USB-C 포트가 위쪽)
+
+    USB-C
+   ┌──────┐
+   │      │
+A0 ┤●     │  ← MQ-135 AO 연결
+A1 ┤●     │
+A2 ┤●     │
+A3 ┤●     │
+SDA┤●     │
+SCL┤●     │
+TX ┤●     │
+RX ┤●     │
+   │      │
+5V ┤●     │
+GND┤●     │  ← MQ-135 GND 연결
+3V3┤●     │  ← MQ-135 VCC 연결
+   └──────┘
+```
+
+> **핀아웃 공식 이미지**: [XIAO ESP32-C6 Pin Multiplexing](https://wiki.seeedstudio.com/xiao_pin_multiplexing_esp32c6/)
+
+---
+
+### 방법 B: 5V + 전압 분배기 (정밀도 향상)
+
+5V로 구동하면 히터가 설계 전압으로 동작하여 더 정확한 측정이 가능합니다.
+단, AO 출력이 최대 5V까지 올라갈 수 있으므로 **전압 분배기**가 반드시 필요합니다.
+
+> ESP32-C6 ADC 최대 입력: **3.1V**. 5V를 직접 연결하면 **보드가 손상**됩니다.
+
+#### 전압 분배기 회로
+
+```
+MQ-135 AO ─────[R1: 100kΩ]────┬──── XIAO A0 (GPIO2)
+                               │
+                           [R2: 100kΩ]
+                               │
+                              GND
 ```
 
 ```
-분배 비율 = R2 / (R1 + R2) = 220 / 490 ≈ 0.449
-5V × 0.449 = 2.245V  (ADC 범위 내 안전)
+분배 비율 = R2 / (R1 + R2) = 100k / 200k = 0.5
+5V × 0.5 = 2.5V  (ADC 범위 3.1V 이내 ✓)
 ```
 
-#### ADC → ppm 변환 코드 로직
+#### 연결 테이블 (방법 B)
+
+| MQ-135 핀 | 연결 |
+|----------|------|
+| VCC | XIAO 5V |
+| GND | XIAO GND |
+| AO | 전압 분배기 입력 → 출력을 XIAO A0에 연결 |
+
+> ⚠️ 방법 B를 사용할 경우 `air_sensor_driver_MQ135.c`의 `MQ135_VCC`를 `5.0f`로,
+> 변환 공식도 전압 분배 비율을 반영하도록 수정해야 합니다.
+
+---
+
+### 현재 구현 기준 (방법 A, 3.3V)
+
+`air_sensor_driver_MQ135.c`의 현재 설정:
 
 ```c
-#define VCC            5.0f       // MQ-135 회로 전압
-#define RL             20.0f      // 부하 저항 (kΩ) — 모듈 실측 필수!
-#define ADC_MAX        4095       // 12비트 ADC
-#define ADC_VREF_MV    2450.0f    // ADC_ATTEN_DB_12 최대 전압 (mV)
-#define VDIV_RATIO     0.449f     // 전압 분배 비율
-
-// ADC 읽기 → Rs 계산
-int adc_raw = adc_oneshot_read(...);
-float v_adc = (adc_raw / (float)ADC_MAX) * (ADC_VREF_MV / 1000.0f);  // V
-float v_out = v_adc / VDIV_RATIO;    // 실제 센서 출력 전압
-float rs = RL * (VCC - v_out) / v_out;  // 센서 저항 (kΩ)
-
-// ppm 계산
-float ratio = rs / R0;  // R0은 교정값
-float ppm_nh3 = 102.2f * powf(ratio, -2.473f);
+#define MQ135_VCC                   3.3f    // 3.3V 직결
+#define MQ135_LOAD_RESISTANCE_KOHM  10.0f   // 모듈 내장 RL (실측 권장)
+#define MQ135_ADC_CHANNEL           ADC_CHANNEL_2  // A0 (GPIO2)
 ```
+
+---
+
+### 참고 영상 & 이미지 자료
+
+초보자에게 도움이 될 시각 자료:
+
+#### XIAO ESP32-C6 공식 자료
+- **핀아웃 이미지**: [Seeed Studio XIAO ESP32-C6 Getting Started](https://wiki.seeedstudio.com/xiao_esp32c6_getting_started/) 페이지 내 "Pinout" 섹션
+- **Seeed Studio 공식 YouTube**: "XIAO ESP32C6" 로 검색
+
+#### MQ-135 배선 참고
+- **YouTube 검색어**: `"MQ-135 ESP32 wiring tutorial"` 또는 `"MQ135 breadboard Arduino 3.3V"`
+- MQ-135는 Arduino 생태계에서 흔히 사용되어 영상 자료가 풍부합니다.
+  ESP32도 동일한 방식으로 연결하면 됩니다.
+
+---
+
+#### ADC 전압 레벨 요약
+
+| 구동 전압 | AO 최대 | ESP32 ADC 안전? | 추가 부품 |
+|----------|---------|----------------|---------|
+| **3.3V** (방법 A) | 3.3V | ✅ 안전 | 없음 |
+| 5V (방법 B) | 5V | ❌ 위험 | 전압 분배기 필요 |
 
 ---
 
@@ -303,29 +421,25 @@ CO(NH₂)₂ + H₂O → 2NH₃ + CO₂
 ### 구현 상수 요약
 
 ```c
-// MQ-135 센서 설정
-#define MQ135_HEATER_VOLTAGE       5.0f      // V
-#define MQ135_CIRCUIT_VOLTAGE      5.0f      // V
-#define MQ135_LOAD_RESISTANCE      20.0f     // kΩ (모듈 실측 필수!)
+// MQ-135 센서 설정 (현재 구현: 방법 A, 3.3V 직결)
+#define MQ135_VCC                  3.3f      // V (3.3V 직결)
+#define MQ135_LOAD_RESISTANCE_KOHM 10.0f     // kΩ (모듈 실측 권장!)
 #define MQ135_CLEAN_AIR_RATIO      3.6f      // Rs/Ro (깨끗한 공기)
 
 // NH₃ 멱함수 계수: ppm = a × (Rs/Ro)^b
-#define MQ135_NH3_COEFF_A          102.2f
-#define MQ135_NH3_COEFF_B          -2.473f
+#define MQ135_NH3_CURVE_A          102.2f
+#define MQ135_NH3_CURVE_B          -2.473f
 
-// ESP32-C6 ADC 설정 (XIAO)
-#define MQ135_ADC_CHANNEL          ADC_CHANNEL_0    // GPIO0 (A0)
-#define MQ135_ADC_ATTEN            ADC_ATTEN_DB_12  // ~0-2450mV
-#define MQ135_ADC_BITWIDTH         ADC_BITWIDTH_DEFAULT  // 12비트
-#define MQ135_ADC_MAX              4095
-#define MQ135_ADC_VREF_MV          2450.0f
+// R0: 깨끗한 공기에서의 센서 저항 (캘리브레이션 필요)
+#define MQ135_R0_KOHM              10.0f     // 기본값, 측정 후 업데이트
 
-// 전압 분배기 (5V → ESP32 안전 범위)
-#define MQ135_VDIV_R1              270000.0f  // Ω
-#define MQ135_VDIV_R2              220000.0f  // Ω
-#define MQ135_VDIV_RATIO           (MQ135_VDIV_R2 / (MQ135_VDIV_R1 + MQ135_VDIV_R2))  // ~0.449
+// ESP32-C6 ADC 설정 (XIAO A0 = GPIO2)
+#define MQ135_ADC_UNIT             ADC_UNIT_1
+#define MQ135_ADC_CHANNEL          ADC_CHANNEL_2   // GPIO2 (XIAO A0)
+#define MQ135_ADC_ATTEN            ADC_ATTEN_DB_12 // 0~3.1V
+#define MQ135_ADC_BITWIDTH         ADC_BITWIDTH_12  // 12비트 (0~4095)
 
-// 온습도 보정 계수
+// 온습도 보정 계수 (미적용 — Phase 7 예정)
 #define MQ135_TEMP_CORA            0.00035f
 #define MQ135_TEMP_CORB            0.02718f
 #define MQ135_TEMP_CORC            1.39538f
