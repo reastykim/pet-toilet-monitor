@@ -29,7 +29,8 @@ extern "C" {
  * During warmup `is_warming_up` is true — values are recorded but unreliable.
  */
 typedef struct {
-    uint16_t nh3_ppm;       /**< NH₃ concentration (ppm), 0–1000 */
+    uint16_t nh3_ppm;       /**< NH₃ concentration (ppm), 0–1000, integer (for Zigbee) */
+    float    nh3_ppm_f;     /**< NH₃ concentration (ppm), floating-point (for event detector) */
     uint32_t raw_adc;       /**< Raw 12-bit ADC value (0–4095), for diagnostics */
     bool     is_warming_up; /**< True while sensor heater is warming up */
     bool     is_valid;      /**< False on ADC read error; true otherwise */

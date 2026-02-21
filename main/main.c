@@ -23,6 +23,10 @@
 
 static const char *TAG = "LITTERBOX";
 
+/* Event detection state — persists across timer callbacks */
+static event_detector_t g_detector;
+static litter_event_t   g_last_reported_event = LITTER_EVENT_NONE;
+
 /********************* Deferred driver init **********************/
 
 static esp_err_t deferred_driver_init(void)
@@ -34,6 +38,7 @@ static esp_err_t deferred_driver_init(void)
         if (ret != ESP_OK) {
             ESP_LOGW(TAG, "Air sensor init failed (%s) — will use fallback value", esp_err_to_name(ret));
         }
+        event_detector_init(&g_detector);
         is_inited = true;
     }
     return is_inited ? ESP_OK : ESP_FAIL;
@@ -47,20 +52,28 @@ static void sensor_report_timer_cb(uint8_t param)
     air_sensor_data_t sensor = {0};
     uint16_t nh3_ppm;
 
+    float ppm_f = 0.0f;   /* float ppm for event detector (higher precision) */
+
     if (air_sensor_read(&sensor) == ESP_OK && sensor.is_valid) {
         nh3_ppm = sensor.nh3_ppm;
+        ppm_f   = sensor.nh3_ppm_f;
         if (sensor.is_warming_up) {
-            ESP_LOGI(TAG, "Sensor warming up (raw=%"PRIu32"), NH3=%u ppm (unreliable)",
-                     sensor.raw_adc, nh3_ppm);
+            ESP_LOGI(TAG, "Sensor warming up (raw=%"PRIu32"), NH3=%.1f ppm (unreliable)",
+                     sensor.raw_adc, (double)ppm_f);
         }
     } else {
         nh3_ppm = NH3_DEFAULT_PPM;
+        ppm_f   = 0.0f;
         ESP_LOGW(TAG, "Sensor read failed — reporting fallback: %u ppm", nh3_ppm);
     }
 
+    /* Run event detection state machine with float ppm (outside lock — pure computation) */
+    litter_event_t new_event = event_detector_update(&g_detector, ppm_f);
+    bool event_changed = (new_event != g_last_reported_event);
+
     esp_zb_lock_acquire(portMAX_DELAY);
 
-    /* --- NH₃ Report (custom cluster 0xFC00) --- */
+    /* --- NH₃ ppm Report (custom cluster 0xFC00, attr 0x0000) --- */
     esp_zb_zcl_set_attribute_val(
         HA_LITTERBOX_ENDPOINT,
         NH3_CUSTOM_CLUSTER_ID,
@@ -78,10 +91,37 @@ static void sensor_report_timer_cb(uint8_t param)
     nh3_report.zcl_basic_cmd.dst_endpoint = 1;
     esp_zb_zcl_report_attr_cmd_req(&nh3_report);
 
+    /* --- Event Type Report (attr 0x0003) — only when event changes --- */
+    if (event_changed) {
+        uint8_t event_val = (uint8_t)new_event;
+        esp_zb_zcl_set_attribute_val(
+            HA_LITTERBOX_ENDPOINT,
+            NH3_CUSTOM_CLUSTER_ID,
+            ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
+            NH3_ATTR_EVENT_TYPE_ID,
+            &event_val, false);
+
+        esp_zb_zcl_report_attr_cmd_t event_report = {0};
+        event_report.address_mode = ESP_ZB_APS_ADDR_MODE_16_ENDP_PRESENT;
+        event_report.attributeID = NH3_ATTR_EVENT_TYPE_ID;
+        event_report.direction = ESP_ZB_ZCL_CMD_DIRECTION_TO_CLI;
+        event_report.clusterID = NH3_CUSTOM_CLUSTER_ID;
+        event_report.zcl_basic_cmd.src_endpoint = HA_LITTERBOX_ENDPOINT;
+        event_report.zcl_basic_cmd.dst_addr_u.addr_short = 0x0000;
+        event_report.zcl_basic_cmd.dst_endpoint = 1;
+        esp_zb_zcl_report_attr_cmd_req(&event_report);
+    }
+
     esp_zb_lock_release();
 
-    ESP_LOGI(TAG, "Reported NH3=%u ppm (custom cluster 0x%04X, raw=%"PRIu32")",
-             nh3_ppm, NH3_CUSTOM_CLUSTER_ID, sensor.raw_adc);
+    ESP_LOGI(TAG, "Reported NH3=%u ppm (%.1f ppm_f, baseline=%.1f, raw=%"PRIu32")",
+             nh3_ppm, (double)ppm_f, event_detector_get_baseline(&g_detector), sensor.raw_adc);
+
+    if (event_changed) {
+        g_last_reported_event = new_event;
+        static const char *event_names[] = {"NONE", "URINATION", "DEFECATION"};
+        ESP_LOGI(TAG, "Event type changed → %s (%u)", event_names[new_event], (unsigned)new_event);
+    }
 
     /* Re-schedule */
     esp_zb_scheduler_alarm((esp_zb_callback_t)sensor_report_timer_cb, 0, SENSOR_REPORT_INTERVAL_MS);
@@ -216,6 +256,7 @@ static esp_zb_cluster_list_t *custom_litterbox_clusters_create(void)
     uint16_t nh3_measured = NH3_DEFAULT_PPM;
     uint16_t nh3_min = NH3_MIN_PPM;
     uint16_t nh3_max = NH3_MAX_PPM;
+    uint8_t  nh3_event_type = (uint8_t)LITTER_EVENT_NONE;
     esp_zb_attribute_list_t *nh3_cluster = esp_zb_zcl_attr_list_create(NH3_CUSTOM_CLUSTER_ID);
     ESP_ERROR_CHECK(esp_zb_custom_cluster_add_custom_attr(nh3_cluster,
         NH3_ATTR_MEASURED_VALUE_ID, ESP_ZB_ZCL_ATTR_TYPE_U16,
@@ -229,6 +270,10 @@ static esp_zb_cluster_list_t *custom_litterbox_clusters_create(void)
         NH3_ATTR_MAX_MEASURED_VALUE_ID, ESP_ZB_ZCL_ATTR_TYPE_U16,
         ESP_ZB_ZCL_ATTR_ACCESS_READ_ONLY,
         &nh3_max));
+    ESP_ERROR_CHECK(esp_zb_custom_cluster_add_custom_attr(nh3_cluster,
+        NH3_ATTR_EVENT_TYPE_ID, ESP_ZB_ZCL_ATTR_TYPE_U8,
+        ESP_ZB_ZCL_ATTR_ACCESS_READ_ONLY | ESP_ZB_ZCL_ATTR_ACCESS_REPORTING,
+        &nh3_event_type));
     ESP_ERROR_CHECK(esp_zb_cluster_list_add_custom_cluster(cluster_list, nh3_cluster, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE));
 
     /* On/Off Cluster (for LED control) */

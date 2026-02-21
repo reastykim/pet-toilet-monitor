@@ -4,6 +4,8 @@ components:
     capabilities:
       - id: tvocMeasurement
         version: 1
+      - id: motionSensor
+        version: 1
       - id: switch
         version: 1
     categories:

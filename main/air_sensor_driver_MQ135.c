@@ -9,7 +9,7 @@
  * raw voltage to ppm using the MQ-135 sensitivity curve.
  *
  * ── Hardware wiring ──────────────────────────────────────────────────────
- *  MQ-135 AOUT → GPIO2 (XIAO ESP32-C6 A0 = ADC1_CHANNEL_2)
+ *  MQ-135 AOUT → GPIO0 (XIAO ESP32-C6 A0 = ADC1_CHANNEL_0)
  *
  *  ⚠ VOLTAGE WARNING:
  *    MQ-135 heater requires 5 V (VH pin). AOUT can swing up to VCC.
@@ -48,7 +48,7 @@ static const char *TAG = "MQ135";
 
 /* ── ADC configuration ──────────────────────────────────────────────── */
 #define MQ135_ADC_UNIT          ADC_UNIT_1
-#define MQ135_ADC_CHANNEL       ADC_CHANNEL_2   /* GPIO2 = XIAO A0 */
+#define MQ135_ADC_CHANNEL       ADC_CHANNEL_0   /* GPIO0 = XIAO A0 */
 #define MQ135_ADC_ATTEN         ADC_ATTEN_DB_12 /* Input range 0 ~ 3.1 V */
 #define MQ135_ADC_BITWIDTH      ADC_BITWIDTH_12  /* 0 ~ 4095 */
 
@@ -60,8 +60,12 @@ static const char *TAG = "MQ135";
 #define MQ135_NH3_CURVE_A   102.2f
 #define MQ135_NH3_CURVE_B   (-2.473f)
 
-/* ── R0: clean-air resistance (kΩ) — must be calibrated per unit ────── */
-#define MQ135_R0_KOHM       10.0f   /* Default; update after calibration */
+/* ── R0: clean-air reference resistance (kΩ) ────────────────────────── */
+/* Estimated from measured Rs in clean air ÷ 3.6 (MQ-135 clean-air ratio).
+ * Measured clean-air raw ≈ 240 → Rs ≈ 160.9 kΩ → R0 = 160.9 / 3.6 ≈ 44.7 kΩ
+ * For accurate calibration: power on outdoors 20+ min, record raw, set
+ * R0 = RL × (VCC − V) / V / 3.6 and rebuild. */
+#define MQ135_R0_KOHM       44.7f
 
 /* ── Output clamp ───────────────────────────────────────────────────── */
 #define MQ135_PPM_MAX       1000
@@ -88,7 +92,7 @@ esp_err_t air_sensor_init(void)
                         TAG, "ADC channel config failed");
 
     s_init_time_us = esp_timer_get_time();
-    ESP_LOGI(TAG, "MQ-135 initialized on GPIO2 (ADC1_CH2), R0=%.1f kΩ, warmup %d ms",
+    ESP_LOGI(TAG, "MQ-135 initialized on GPIO0 (ADC1_CH0), R0=%.1f kΩ, warmup %d ms",
              (double)MQ135_R0_KOHM, AIR_SENSOR_WARMUP_MS);
     return ESP_OK;
 }
@@ -127,8 +131,9 @@ esp_err_t air_sensor_read(air_sensor_data_t *out)
     if (ppm_f < 0.0f)          ppm_f = 0.0f;
     if (ppm_f > MQ135_PPM_MAX) ppm_f = (float)MQ135_PPM_MAX;
 
-    out->nh3_ppm  = (uint16_t)ppm_f;
-    out->is_valid = true;
+    out->nh3_ppm   = (uint16_t)ppm_f;
+    out->nh3_ppm_f = ppm_f;
+    out->is_valid  = true;
 
     ESP_LOGD(TAG, "raw=%"PRIu32" V=%.3f Rs=%.2fkΩ Rs/R0=%.2f NH3=%.1fppm%s",
              out->raw_adc, (double)voltage, (double)rs_kohm, (double)ratio, (double)ppm_f,

@@ -13,6 +13,7 @@
 #include "light_driver.h"
 #include "zcl_utility.h"
 #include "air_sensor_driver.h"
+#include "event_detector.h"
 
 /* Zigbee configuration */
 #define INSTALLCODE_POLICY_ENABLE       false   /* enable the install code policy for security */
@@ -33,6 +34,7 @@
 #define NH3_ATTR_MEASURED_VALUE_ID      0x0000  /* Measured value: uint16, ppm */
 #define NH3_ATTR_MIN_MEASURED_VALUE_ID  0x0001  /* Min measurable: uint16, ppm */
 #define NH3_ATTR_MAX_MEASURED_VALUE_ID  0x0002  /* Max measurable: uint16, ppm */
+#define NH3_ATTR_EVENT_TYPE_ID          0x0003  /* Event type: uint8 (0=none, 1=urination, 2=defecation) */
 #define NH3_DEFAULT_PPM                 0       /* Fallback when sensor read fails */
 #define NH3_MIN_PPM                     0
 #define NH3_MAX_PPM                     1000
