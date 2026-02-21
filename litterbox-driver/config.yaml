@@ -1,5 +1,5 @@
-name: litterbox-driver-v19
-packageKey: litterbox-driver-v19
+name: litterbox-driver-v20
+packageKey: litterbox-driver-v20
 permissions:
   zigbee: {}
 description: "LitterBox.v1 Smart Pet Toilet Monitor"

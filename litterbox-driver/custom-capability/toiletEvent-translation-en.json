@@ -1,0 +1,20 @@
+{
+  "tag": "en",
+  "label": "Toilet Event",
+  "description": "Urination/defecation event detection",
+  "attributes": {
+    "toiletEvent": {
+      "label": "Toilet Event",
+      "description": "Pet toilet usage detection",
+      "displayTemplate": "{{device.label}} status: {{value}}",
+      "i18n": {
+        "value": {
+          "none": "Not detected",
+          "urination": "Urination detected",
+          "defecation": "Defecation detected"
+        }
+      }
+    }
+  },
+  "commands": {}
+}

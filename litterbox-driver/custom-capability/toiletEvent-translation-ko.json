@@ -1,0 +1,20 @@
+{
+  "tag": "ko",
+  "label": "배변 감지",
+  "description": "배뇨/배변 이벤트 감지",
+  "attributes": {
+    "toiletEvent": {
+      "label": "배변 감지",
+      "description": "화장실 사용 감지",
+      "displayTemplate": "{{device.label}} 상태: {{value}}",
+      "i18n": {
+        "value": {
+          "none": "감지 안 됨",
+          "urination": "소변 감지됨",
+          "defecation": "대변 감지됨"
+        }
+      }
+    }
+  },
+  "commands": {}
+}

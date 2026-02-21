@@ -4,7 +4,7 @@ components:
     capabilities:
       - id: streetsmile37673.nh3measurement
         version: 1
-      - id: streetsmile37673.litterevent
+      - id: streetsmile37673.toiletevent
         version: 1
       - id: switch
         version: 1

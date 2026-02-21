@@ -1,5 +1,5 @@
 local log = require "log"
-log.info("=== LITTERBOX v19 LOADING ===")
+log.info("=== LITTERBOX v20 LOADING ===")
 
 local ZigbeeDriver = require "st.zigbee"
 local capabilities = require "st.capabilities"
@@ -17,10 +17,10 @@ local NH3_EVENT_TYPE_ATTR     = 0x0003
 
 -- Custom capabilities
 local nh3Measurement = capabilities["streetsmile37673.nh3measurement"]
-local litterEvent    = capabilities["streetsmile37673.litterevent"]
+local toiletEvent    = capabilities["streetsmile37673.toiletevent"]
 
-log.info(string.format("=== LITTERBOX v19 capabilities: nh3=%s, litter=%s ===",
-  tostring(nh3Measurement), tostring(litterEvent)))
+log.info(string.format("=== LITTERBOX v20 capabilities: nh3=%s, toilet=%s ===",
+  tostring(nh3Measurement), tostring(toiletEvent)))
 
 -- NH₃ handler: uint16 ppm → nh3Measurement custom capability
 local function nh3_attr_handler(driver, device, value, zb_rx)
@@ -32,49 +32,49 @@ local function nh3_attr_handler(driver, device, value, zb_rx)
   }))
 end
 
--- Event type handler: uint8 → litterEvent custom capability
--- 0 = no event  → litterEvent("none")
--- 1 = urination → litterEvent("urination")
--- 2 = defecation → litterEvent("defecation")
+-- Event type handler: uint8 → toiletEvent custom capability
+-- 0 = no event  → toiletEvent("none")
+-- 1 = urination → toiletEvent("urination")
+-- 2 = defecation → toiletEvent("defecation")
 local function event_type_attr_handler(driver, device, value, zb_rx)
   local event_type = value.value  -- uint8
   local event_names = { [0] = "none", [1] = "urination", [2] = "defecation" }
   local event_name = event_names[event_type] or "none"
-  log.info(string.format("EventType: %d → litterEvent(%s)", event_type, event_name))
-  device:emit_event(litterEvent.litterEvent({ value = event_name }))
+  log.info(string.format("EventType: %d → toiletEvent(%s)", event_type, event_name))
+  device:emit_event(toiletEvent.toiletEvent({ value = event_name }))
 end
 
 -- Lifecycle: device added
 local function device_added(driver, device)
-  log.info("=== LITTERBOX v19 device_added ===")
+  log.info("=== LITTERBOX v20 device_added ===")
   device:emit_event(nh3Measurement.ammoniaLevel({ value = 0, unit = "ppm" }))
-  device:emit_event(litterEvent.litterEvent({ value = "none" }))
+  device:emit_event(toiletEvent.toiletEvent({ value = "none" }))
   device:emit_event(capabilities.switch.switch.off())
 end
 
 -- Lifecycle: device init
 local function device_init(driver, device)
-  log.info("=== LITTERBOX v19 device_init ===")
+  log.info("=== LITTERBOX v20 device_init ===")
   -- Emit initial state so the app doesn't show "-" after driver switch
   local ok, err = pcall(function()
-    device:emit_event(litterEvent.litterEvent({ value = "none" }))
+    device:emit_event(toiletEvent.toiletEvent({ value = "none" }))
   end)
   if not ok then
-    log.error("device_init litterEvent emit failed: " .. tostring(err))
+    log.error("device_init toiletEvent emit failed: " .. tostring(err))
   end
 end
 
 -- Lifecycle: doConfigure
 local function do_configure(driver, device)
-  log.info("=== LITTERBOX v19 do_configure ===")
+  log.info("=== LITTERBOX v20 do_configure ===")
   device:configure()
-  log.info("=== LITTERBOX v19 configure done ===")
+  log.info("=== LITTERBOX v20 configure done ===")
 end
 
 local driver_template = {
   supported_capabilities = {
     nh3Measurement,
-    litterEvent,
+    toiletEvent,
     capabilities.switch,
   },
   zigbee_handlers = {
@@ -97,5 +97,5 @@ defaults.register_for_default_handlers(driver_template, driver_template.supporte
 
 local litterbox_driver = ZigbeeDriver("litterbox", driver_template)
 
-log.info("=== LITTERBOX v19 driver created, calling run ===")
+log.info("=== LITTERBOX v20 driver created, calling run ===")
 litterbox_driver:run()

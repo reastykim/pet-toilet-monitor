@@ -1,0 +1,84 @@
+{
+  "dashboard": {
+    "states": [
+      {
+        "label": "{{toiletEvent.value}}",
+        "alternatives": [
+          {
+            "key": "none",
+            "value": "감지 안 됨",
+            "type": "inactive"
+          },
+          {
+            "key": "urination",
+            "value": "소변 감지됨",
+            "type": "active"
+          },
+          {
+            "key": "defecation",
+            "value": "대변 감지됨",
+            "type": "active"
+          }
+        ]
+      }
+    ],
+    "actions": [],
+    "panelItems": []
+  },
+  "detailView": [
+    {
+      "label": "배변 감지",
+      "displayType": "state",
+      "state": {
+        "label": "{{toiletEvent.value}}",
+        "alternatives": [
+          {
+            "key": "none",
+            "value": "감지 안 됨",
+            "type": "inactive"
+          },
+          {
+            "key": "urination",
+            "value": "소변 감지됨",
+            "type": "active"
+          },
+          {
+            "key": "defecation",
+            "value": "대변 감지됨",
+            "type": "active"
+          }
+        ]
+      }
+    }
+  ],
+  "automation": {
+    "conditions": [
+      {
+        "label": "배변 감지",
+        "displayType": "list",
+        "list": {
+          "alternatives": [
+            {
+              "key": "none",
+              "value": "감지 안 됨",
+              "type": "inactive"
+            },
+            {
+              "key": "urination",
+              "value": "소변 감지됨",
+              "type": "active"
+            },
+            {
+              "key": "defecation",
+              "value": "대변 감지됨",
+              "type": "active"
+            }
+          ],
+          "value": "toiletEvent.value",
+          "multiSelectable": false
+        }
+      }
+    ],
+    "actions": []
+  }
+}
