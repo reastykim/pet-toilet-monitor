@@ -82,10 +82,10 @@ pet-toilet-monitor_v2/
 │       ├── nh3Measurement-presentation.json     # 앱 표시 설정
 │       ├── nh3Measurement-translation-ko.json   # 한국어 번역
 │       ├── nh3Measurement-translation-en.json   # 영문 번역
-│       ├── litterEvent.json                     # 배변 이벤트 capability 스키마
-│       ├── litterEvent-presentation.json        # 앱 표시 설정 (3상태)
-│       ├── litterEvent-translation-ko.json      # 한국어 번역
-│       └── litterEvent-translation-en.json      # 영문 번역
+│       ├── toiletEvent.json                     # 배변 이벤트 capability 스키마
+│       ├── toiletEvent-presentation.json        # 앱 표시 설정 (3상태)
+│       ├── toiletEvent-translation-ko.json      # 한국어 번역
+│       └── toiletEvent-translation-en.json      # 영문 번역
 ├── CLAUDE_old.md                 # 초기 계획 아카이브 + 빌드 설정 기록
 └── PROJECT_PLAN.md               # 6단계 로드맵
 ```
@@ -102,10 +102,10 @@ pet-toilet-monitor_v2/
 - [x] SmartThings Hub 페어링 성공 (Endpoint 1)
 - [x] 커스텀 NH₃ 클러스터 (0xFC00, uint16 ppm) 구현
 - [x] On/Off 클러스터 유지 (LED 원격 제어)
-- [x] **[Phase 5]** MQ-135 ADC 통합 (R0=44.7kΩ, 10초 주기 리포트)
+- [x] **[Phase 5]** MQ-135 ADC 통합 (R0=10.0kΩ 임시, 5V 재캘리브레이션 필요, 10초 주기 리포트)
 - [x] **[Phase 6]** 배뇨/배변 이벤트 감지 상태 머신 (IDLE/ACTIVE/COOLDOWN)
 - [x] attr 0x0003 (uint8): 이벤트 타입 전송 (0=없음, 1=소변, 2=대변)
-- [x] SmartThings 커스텀 Capability 2종 등록 및 적용 (v17 드라이버)
+- [x] SmartThings 커스텀 Capability 2종 등록 및 적용 (v20 드라이버)
 
 ### 미완료 (다음 Phase)
 
@@ -150,7 +150,7 @@ pet-toilet-monitor_v2/
 
 ## SmartThings Edge Driver
 
-### 현재 버전: v17
+### 현재 버전: v20
 
 `litterbox-driver/` 디렉토리에 위치.
 
@@ -176,8 +176,8 @@ smartthings edge:drivers:uninstall <driverId> --hub <hubId>
 
 #### 현재 SmartThings ID
 
-- **Device**: `c25574ac-3eaf-41f2-8324-c078c15e3c7d`
-- **Driver (v17)**: `52e97c37-3b28-4352-aa4e-585c3626e603`
+- **Device**: `123c3d8e-4b69-412f-8c21-9ac9987b179d`
+- **Driver (v20)**: `1c6ba2e5-4a10-4d77-91f3-d345a6fb0625`
 - **Channel**: `30e3213f-f924-4f19-964c-fe44c2a09496`
 - **Hub**: `7a93da67-817b-4a20-ad71-f46e023a1992` (IP: `192.168.10.60`)
 
@@ -212,13 +212,13 @@ local nh3Measurement = capabilities["streetsmile37673.nh3measurement"]
 device:emit_event(nh3Measurement.ammoniaLevel({ value = ppm, unit = "ppm" }))
 ```
 
-#### 2. `streetsmile37673.litterevent` — 배변 감지
+#### 2. `streetsmile37673.toiletevent` — 배변 감지
 
 | 항목 | 값 |
 |------|-----|
-| Capability ID | `streetsmile37673.litterevent` |
+| Capability ID | `streetsmile37673.toiletevent` |
 | Version | 1 |
-| Attribute | `litterEvent` (enum: none / urination / defecation) |
+| Attribute | `toiletEvent` (enum: none / urination / defecation) |
 | 앱 표시 레이블 | 배변 감지 |
 | 앱 information 팝업 | 제목: 배변 감지 / 내용: 배뇨/배변 이벤트 감지 |
 | idle 상태 | 감지 안 됨 |
@@ -227,10 +227,10 @@ device:emit_event(nh3Measurement.ammoniaLevel({ value = ppm, unit = "ppm" }))
 
 **Lua 사용 예시**:
 ```lua
-local litterEvent = capabilities["streetsmile37673.litterevent"]
-device:emit_event(litterEvent.litterEvent({ value = "none" }))       -- 평상시
-device:emit_event(litterEvent.litterEvent({ value = "urination" }))  -- 소변
-device:emit_event(litterEvent.litterEvent({ value = "defecation" })) -- 대변
+local toiletEvent = capabilities["streetsmile37673.toiletevent"]
+device:emit_event(toiletEvent.toiletEvent({ value = "none" }))       -- 평상시
+device:emit_event(toiletEvent.toiletEvent({ value = "urination" }))  -- 소변
+device:emit_event(toiletEvent.toiletEvent({ value = "defecation" })) -- 대변
 ```
 
 ### 커스텀 Capability 등록 절차
@@ -260,7 +260,7 @@ smartthings capabilities:namespaces
   "label": "배변 감지",
   "description": "배뇨/배변 이벤트 감지",
   "attributes": {
-    "litterEvent": {
+    "toiletEvent": {
       "label": "배변 감지",
       "description": "화장실 사용 감지",
       "displayTemplate": "{{device.label}} 상태: {{value}}",
@@ -288,14 +288,14 @@ components:
     capabilities:
       - id: streetsmile37673.nh3measurement
         version: 1
-      - id: streetsmile37673.litterevent
+      - id: streetsmile37673.toiletevent
         version: 1
 ```
 
 **init.lua**:
 ```lua
 local nh3Measurement = capabilities["streetsmile37673.nh3measurement"]
-local litterEvent    = capabilities["streetsmile37673.litterevent"]
+local toiletEvent    = capabilities["streetsmile37673.toiletevent"]
 ```
 
 > **주의**: `device_init`에서도 초기값을 emit해야 드라이버 전환 후 앱에 "-" 대신 정상 값이 표시됨.
@@ -396,7 +396,7 @@ esp_zb_zcl_report_attr_cmd_req(&nh3_report);
 ```lua
 local function device_init(driver, device)
   local ok, err = pcall(function()
-    device:emit_event(litterEvent.litterEvent({ value = "none" }))
+    device:emit_event(toiletEvent.toiletEvent({ value = "none" }))
   end)
   if not ok then log.error("device_init emit failed: " .. tostring(err)) end
 end
