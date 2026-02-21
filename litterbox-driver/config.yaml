@@ -2,5 +2,5 @@ name: litterbox-driver-v18
 packageKey: litterbox-driver-v18
 permissions:
   zigbee: {}
-description: SmartThings Edge Driver for LitterBox.v1 Pet Litter Box Monitor
+description: SmartThings Edge Driver for LitterBox.v1 Smart Pet Toilet Monitor
 vendorSupportInformation: https://github.com/reasty/litterbox

@@ -1,4 +1,4 @@
-# LitterBox.v1 - Smart Pet Litter Box Monitoring System
+# LitterBox.v1 - 스마트 반려동물 화장실 모니터 (Smart Pet Toilet Monitor)
 
 ## 프로젝트 개요
 

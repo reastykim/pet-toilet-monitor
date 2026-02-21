@@ -3,7 +3,7 @@
  *
  * SPDX-License-Identifier: CC0-1.0
  *
- * LitterBox.v1 - Smart Cat Litter Box Monitoring System
+ * LitterBox.v1 - Smart Pet Toilet Monitor
  *
  * Based on ESP Zigbee HA_temperature_sensor example.
  * Clusters: Custom NH₃ Concentration (0xFC00) + On/Off (0x0006)
