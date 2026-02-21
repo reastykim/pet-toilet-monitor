@@ -2,5 +2,5 @@ name: litterbox-driver-v19
 packageKey: litterbox-driver-v19
 permissions:
   zigbee: {}
-description: "LitterBox.v1 Smart Pet Toilet Monitor | Developer: Reasty Kim"
-vendorSupportInformation: https://github.com/reasty/litterbox
+description: "LitterBox.v1 Smart Pet Toilet Monitor"
+vendorSupportInformation: https://github.com/reastykim/litterbox
