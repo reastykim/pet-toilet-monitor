@@ -1,5 +1,5 @@
 local log = require "log"
-log.info("=== LITTERBOX v18 LOADING ===")
+log.info("=== LITTERBOX v19 LOADING ===")
 
 local ZigbeeDriver = require "st.zigbee"
 local capabilities = require "st.capabilities"
@@ -19,7 +19,7 @@ local NH3_EVENT_TYPE_ATTR     = 0x0003
 local nh3Measurement = capabilities["streetsmile37673.nh3measurement"]
 local litterEvent    = capabilities["streetsmile37673.litterevent"]
 
-log.info(string.format("=== LITTERBOX v18 capabilities: nh3=%s, litter=%s ===",
+log.info(string.format("=== LITTERBOX v19 capabilities: nh3=%s, litter=%s ===",
   tostring(nh3Measurement), tostring(litterEvent)))
 
 -- NH₃ handler: uint16 ppm → nh3Measurement custom capability
@@ -46,7 +46,7 @@ end
 
 -- Lifecycle: device added
 local function device_added(driver, device)
-  log.info("=== LITTERBOX v18 device_added ===")
+  log.info("=== LITTERBOX v19 device_added ===")
   device:emit_event(nh3Measurement.ammoniaLevel({ value = 0, unit = "ppm" }))
   device:emit_event(litterEvent.litterEvent({ value = "none" }))
   device:emit_event(capabilities.switch.switch.off())
@@ -54,7 +54,7 @@ end
 
 -- Lifecycle: device init
 local function device_init(driver, device)
-  log.info("=== LITTERBOX v18 device_init ===")
+  log.info("=== LITTERBOX v19 device_init ===")
   -- Emit initial state so the app doesn't show "-" after driver switch
   local ok, err = pcall(function()
     device:emit_event(litterEvent.litterEvent({ value = "none" }))
@@ -66,9 +66,9 @@ end
 
 -- Lifecycle: doConfigure
 local function do_configure(driver, device)
-  log.info("=== LITTERBOX v18 do_configure ===")
+  log.info("=== LITTERBOX v19 do_configure ===")
   device:configure()
-  log.info("=== LITTERBOX v18 configure done ===")
+  log.info("=== LITTERBOX v19 configure done ===")
 end
 
 local driver_template = {
@@ -97,5 +97,5 @@ defaults.register_for_default_handlers(driver_template, driver_template.supporte
 
 local litterbox_driver = ZigbeeDriver("litterbox", driver_template)
 
-log.info("=== LITTERBOX v18 driver created, calling run ===")
+log.info("=== LITTERBOX v19 driver created, calling run ===")
 litterbox_driver:run()
