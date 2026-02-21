@@ -1,0 +1,38 @@
+{
+  "dashboard": {
+    "states": [
+      {
+        "label": "{{ammoniaLevel.value}}{{ammoniaLevel.unit}}"
+      }
+    ],
+    "actions": [],
+    "panelItems": []
+  },
+  "detailView": [
+    {
+      "label": "암모니아(NH3)",
+      "displayType": "slider",
+      "slider": {
+        "range": [0, 1000],
+        "unit": "ammoniaLevel.unit",
+        "value": "ammoniaLevel.value",
+        "valueType": "number"
+      }
+    }
+  ],
+  "automation": {
+    "conditions": [
+      {
+        "label": "암모니아(NH3)",
+        "displayType": "numberField",
+        "numberField": {
+          "value": "ammoniaLevel.value",
+          "valueType": "number",
+          "unit": "ammoniaLevel.unit",
+          "range": [0, 1000]
+        }
+      }
+    ],
+    "actions": []
+  }
+}

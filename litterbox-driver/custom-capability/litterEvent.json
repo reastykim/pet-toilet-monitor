@@ -1,0 +1,19 @@
+{
+  "name": "litterEvent",
+  "attributes": {
+    "litterEvent": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string",
+            "enum": ["none", "urination", "defecation"]
+          }
+        },
+        "additionalProperties": false,
+        "required": ["value"]
+      },
+      "enumCommands": []
+    }
+  }
+}
