@@ -11,25 +11,33 @@
  * ── Hardware wiring ──────────────────────────────────────────────────────
  *  MQ-135 AOUT → GPIO0 (XIAO ESP32-C6 A0 = ADC1_CHANNEL_0)
  *
- *  ⚠ VOLTAGE WARNING:
- *    MQ-135 heater requires 5 V (VH pin). AOUT can swing up to VCC.
- *    ESP32-C6 ADC maximum input is 3.3 V.
- *    Options to stay safe:
- *      A) Power the MQ-135 module at 3.3 V (reduced sensitivity, but safe).
- *      B) Add a voltage divider on AOUT: e.g. 100 kΩ + 100 kΩ → halves voltage.
- *    This driver assumes option A (VCC = 3.3 V).
+ *  ⚠ VOLTAGE / WIRING:
+ *    MQ-135 VCC  → XIAO VBUS (5 V)
+ *    MQ-135 GND  → XIAO GND
+ *    MQ-135 AOUT → 100 kΩ → GPIO0 (ADC)
+ *                      │
+ *                    100 kΩ
+ *                      │
+ *                     GND
+ *    Voltage divider (1:1) halves AOUT: max 5V → 2.5V → safe for ADC (3.3V max).
+ *    ADC reference is still 3.3 V; AOUT_actual = V_adc × DIVIDER_RATIO (2.0).
  *
  * ── Electrical model ─────────────────────────────────────────────────────
- *  AOUT  = VCC × RL / (Rs + RL)
- *  Rs    = RL × (VCC − AOUT) / AOUT       [sensor resistance]
+ *  AOUT_sensor = VCC × RL / (Rs + RL)
+ *  V_adc       = AOUT_sensor / DIVIDER_RATIO          [what ADC sees]
+ *  AOUT_sensor = V_adc × DIVIDER_RATIO
+ *  Rs          = RL × (VCC − AOUT_sensor) / AOUT_sensor
  *  Rs/R0 → NH₃ ppm via sensitivity curve  [R0 = resistance in clean air]
  *
  * ── Calibration ──────────────────────────────────────────────────────────
- *  R0 (MQ135_R0_KOHM) must be measured per sensor unit:
- *    1. Power on in clean outdoor air.
+ *  R0 (MQ135_R0_KOHM) must be measured per sensor unit at 5 V:
+ *    1. Power on in clean outdoor air (5 V supply + divider).
  *    2. Wait ≥ 20 minutes for full thermal stabilization.
- *    3. Record AOUT voltage (Vmeas).
- *    4. R0 = RL × (VCC − Vmeas) / Vmeas
+ *    3. Record raw_adc from serial log.
+ *    4. V_adc = raw / 4095 × 3.3
+ *       AOUT  = V_adc × 2.0
+ *       Rs    = RL × (5.0 − AOUT) / AOUT
+ *       R0    = Rs / 3.6
  *    5. Update MQ135_R0_KOHM and rebuild.
  *
  * ── NH₃ sensitivity curve ────────────────────────────────────────────────
@@ -54,18 +62,21 @@ static const char *TAG = "MQ135";
 
 /* ── Electrical constants ───────────────────────────────────────────── */
 #define MQ135_LOAD_RESISTANCE_KOHM  10.0f   /* RL on module board (kΩ) */
-#define MQ135_VCC                   3.3f    /* Sensor supply voltage (V) */
+#define MQ135_VCC                   5.0f    /* Sensor supply voltage (V) — VBUS */
+#define MQ135_DIVIDER_RATIO         2.0f    /* AOUT voltage divider (100kΩ:100kΩ = ×2) */
+#define MQ135_ADC_VREF              3.3f    /* ESP32-C6 ADC reference voltage (V) */
 
 /* ── NH₃ sensitivity curve ──────────────────────────────────────────── */
 #define MQ135_NH3_CURVE_A   102.2f
 #define MQ135_NH3_CURVE_B   (-2.473f)
 
 /* ── R0: clean-air reference resistance (kΩ) ────────────────────────── */
-/* Estimated from measured Rs in clean air ÷ 3.6 (MQ-135 clean-air ratio).
- * Measured clean-air raw ≈ 240 → Rs ≈ 160.9 kΩ → R0 = 160.9 / 3.6 ≈ 44.7 kΩ
- * For accurate calibration: power on outdoors 20+ min, record raw, set
- * R0 = RL × (VCC − V) / V / 3.6 and rebuild. */
-#define MQ135_R0_KOHM       44.7f
+/* Initial estimate for 5 V operation. Must be recalibrated:
+ *   power on outdoors 20+ min, read raw from log, then:
+ *   V_adc = raw/4095 × 3.3,  AOUT = V_adc × 2.0
+ *   Rs = RL × (5.0 − AOUT) / AOUT,  R0 = Rs / 3.6
+ * Typical range at 5 V: 8~20 kΩ */
+#define MQ135_R0_KOHM       10.0f
 
 /* ── Output clamp ───────────────────────────────────────────────────── */
 #define MQ135_PPM_MAX       1000
@@ -92,8 +103,8 @@ esp_err_t air_sensor_init(void)
                         TAG, "ADC channel config failed");
 
     s_init_time_us = esp_timer_get_time();
-    ESP_LOGI(TAG, "MQ-135 initialized on GPIO0 (ADC1_CH0), R0=%.1f kΩ, warmup %d ms",
-             (double)MQ135_R0_KOHM, AIR_SENSOR_WARMUP_MS);
+    ESP_LOGI(TAG, "MQ-135 initialized on GPIO0 (ADC1_CH0), VCC=%.1fV divider=%.1f R0=%.1f kΩ, warmup %d ms",
+             (double)MQ135_VCC, (double)MQ135_DIVIDER_RATIO, (double)MQ135_R0_KOHM, AIR_SENSOR_WARMUP_MS);
     return ESP_OK;
 }
 
@@ -117,11 +128,15 @@ esp_err_t air_sensor_read(air_sensor_data_t *out)
     }
     out->raw_adc = (uint32_t)raw;
 
-    /* raw → voltage (V) */
-    float voltage = (raw / 4095.0f) * MQ135_VCC;
-    if (voltage < 0.01f) voltage = 0.01f;   /* guard division by zero */
+    /* raw → V_adc (what ADC sees after divider) */
+    float v_adc = (raw / 4095.0f) * MQ135_ADC_VREF;
+    if (v_adc < 0.001f) v_adc = 0.001f;    /* guard division by zero */
 
-    /* voltage → Rs (kΩ) */
+    /* V_adc → AOUT_sensor (actual sensor output, before divider) */
+    float voltage = v_adc * MQ135_DIVIDER_RATIO;
+    if (voltage >= MQ135_VCC) voltage = MQ135_VCC - 0.01f;
+
+    /* AOUT_sensor → Rs (kΩ) */
     float rs_kohm = MQ135_LOAD_RESISTANCE_KOHM * (MQ135_VCC - voltage) / voltage;
     if (rs_kohm <= 0.0f) rs_kohm = 0.01f;
 
@@ -135,8 +150,8 @@ esp_err_t air_sensor_read(air_sensor_data_t *out)
     out->nh3_ppm_f = ppm_f;
     out->is_valid  = true;
 
-    ESP_LOGD(TAG, "raw=%"PRIu32" V=%.3f Rs=%.2fkΩ Rs/R0=%.2f NH3=%.1fppm%s",
-             out->raw_adc, (double)voltage, (double)rs_kohm, (double)ratio, (double)ppm_f,
+    ESP_LOGD(TAG, "raw=%"PRIu32" Vadc=%.3f Aout=%.3f Rs=%.2fkΩ Rs/R0=%.2f NH3=%.1fppm%s",
+             out->raw_adc, (double)v_adc, (double)voltage, (double)rs_kohm, (double)ratio, (double)ppm_f,
              out->is_warming_up ? " [WARMUP]" : "");
 
     return ESP_OK;
