@@ -2,9 +2,9 @@ name: litterbox-v1
 components:
   - id: main
     capabilities:
-      - id: tvocMeasurement
+      - id: streetsmile37673.nh3measurement
         version: 1
-      - id: carbonMonoxideDetector
+      - id: streetsmile37673.toiletevent
         version: 1
       - id: switch
         version: 1

@@ -1,0 +1,19 @@
+{
+  "name": "toiletEvent",
+  "attributes": {
+    "toiletEvent": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string",
+            "enum": ["none", "urination", "defecation"]
+          }
+        },
+        "additionalProperties": false,
+        "required": ["value"]
+      },
+      "enumCommands": []
+    }
+  }
+}

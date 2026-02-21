@@ -1,8 +1,8 @@
-# LitterBox.v1 - Smart Cat Litter Box Monitoring System
+# LitterBox.v1 - 스마트 반려동물 화장실 모니터 (Smart Pet Toilet Monitor)
 
 ## 프로젝트 개요
 
-Zigbee 기반 스마트 고양이 화장실 모니터링 시스템. MQ-135 센서로 암모니아를 감지하여 SmartThings Hub를 통해 배뇨/배변 이벤트를 알린다.
+Zigbee 기반 스마트 반려동물 화장실 모니터링 시스템. MQ-135 센서로 암모니아를 감지하여 SmartThings Hub를 통해 배뇨/배변 이벤트를 알린다.
 
 - **제조사**: Reasty
 - **모델**: LitterBox.v1
@@ -53,10 +53,14 @@ MSYSTEM=           (빈 문자열 - MSys 경고 방지)
 ```
 pet-toilet-monitor_v2/
 ├── main/
-│   ├── main.c                    # Zigbee 메인 로직 (Temp + CO₂ + On/Off Light)
+│   ├── main.c                    # Zigbee 메인 로직
 │   ├── main.h                    # 디바이스 설정, 매크로 정의
+│   ├── event_detector.c          # 배뇨/배변 이벤트 감지 상태 머신
+│   ├── event_detector.h          # 이벤트 감지기 타입/API
 │   ├── light_driver_internal.c   # GPIO15 LED 드라이버 (Active-Low)
 │   ├── light_driver.h            # LED 인터페이스
+│   ├── air_sensor_driver_MQ135.c # MQ-135 ADC 센서 드라이버
+│   ├── air_sensor_driver.h       # 센서 추상화 헤더
 │   ├── zcl_utility.c             # ZCL 유틸리티 (제조사 정보 등록)
 │   ├── zcl_utility.h             # ZCL 유틸리티 헤더
 │   ├── idf_component.yml         # 컴포넌트 의존성
@@ -66,40 +70,45 @@ pet-toilet-monitor_v2/
 ├── sdkconfig.defaults            # Zigbee ZED 기본 설정
 ├── build.ps1                     # PowerShell 빌드 스크립트
 ├── CLAUDE.md                     # 이 파일
-├── litterbox-driver/              # SmartThings Edge Driver
-│   ├── config.yaml               # 드라이버 메타데이터
+├── litterbox-driver/             # SmartThings Edge Driver
+│   ├── config.yaml               # 드라이버 메타데이터 (packageKey, permissions)
 │   ├── fingerprints.yaml         # Reasty/LitterBox.v1 핑거프린트
 │   ├── profiles/
-│   │   └── litterbox-v1.yaml     # Temp + CO₂ + Switch capabilities
-│   └── src/
-│       └── init.lua              # Zigbee → SmartThings 매핑 로직
+│   │   └── litterbox-v1.yaml     # 디바이스 프로파일 (커스텀 capabilities)
+│   ├── src/
+│   │   └── init.lua              # Zigbee → SmartThings 매핑 로직
+│   └── custom-capability/        # SmartThings 커스텀 Capability 정의 파일
+│       ├── nh3Measurement.json                  # NH₃ 농도 capability 스키마
+│       ├── nh3Measurement-presentation.json     # 앱 표시 설정
+│       ├── nh3Measurement-translation-ko.json   # 한국어 번역
+│       ├── nh3Measurement-translation-en.json   # 영문 번역
+│       ├── litterEvent.json                     # 배변 이벤트 capability 스키마
+│       ├── litterEvent-presentation.json        # 앱 표시 설정 (3상태)
+│       ├── litterEvent-translation-ko.json      # 한국어 번역
+│       └── litterEvent-translation-en.json      # 영문 번역
 ├── CLAUDE_old.md                 # 초기 계획 아카이브 + 빌드 설정 기록
 └── PROJECT_PLAN.md               # 6단계 로드맵
 ```
 
 ---
 
-## 현재 구현 상태 (Phase 4 완료 - 커스텀 NH₃ 클러스터 0xFC00 SmartThings 연동 검증)
+## 현재 구현 상태 (Phase 6 완료 + 커스텀 Capability 적용)
 
-### Phase 1~4 (완료)
+### Phase 1~6 (완료)
 
 - [x] 프로젝트 독립화 (예제에서 분리, EXTRA_COMPONENT_DIRS 제거)
-- [x] GPIO15 LED 드라이버 (Active-Low, WS2812 대신 직접 GPIO 제어)
+- [x] GPIO15 LED 드라이버 (Active-Low, GPIO 직접 제어)
 - [x] 디바이스 정보: Reasty / LitterBox.v1 (ZCL 문자열 포맷)
 - [x] SmartThings Hub 페어링 성공 (Endpoint 1)
-- [x] CO₂ 클러스터(0x040D)로 더미 NH₃ 50 ppm 전송 검증 (Phase 3)
+- [x] 커스텀 NH₃ 클러스터 (0xFC00, uint16 ppm) 구현
 - [x] On/Off 클러스터 유지 (LED 원격 제어)
-- [x] 커스텀 NH₃ 클러스터 (0xFC00, uint16 ppm 직접) 구현
-- [x] Edge Driver v12: 0xFC00 핸들러 + tvocMeasurement capability
-- [x] SmartThings 앱에서 NH₃ 50 ppm 실시간 표시 (10초 간격)
-- [x] tvocMeasurement 그래프 뷰 (1h/24h/31d) 지원 확인
-- [x] 디바이스 상태: PROVISIONED (정상)
+- [x] **[Phase 5]** MQ-135 ADC 통합 (R0=44.7kΩ, 10초 주기 리포트)
+- [x] **[Phase 6]** 배뇨/배변 이벤트 감지 상태 머신 (IDLE/ACTIVE/COOLDOWN)
+- [x] attr 0x0003 (uint8): 이벤트 타입 전송 (0=없음, 1=소변, 2=대변)
+- [x] SmartThings 커스텀 Capability 2종 등록 및 적용 (v17 드라이버)
 
 ### 미완료 (다음 Phase)
 
-- [ ] **[Phase 5]** MQ-135 센서 ADC 통합 (air_sensor_driver_MQ135.c)
-- [ ] **[Phase 5]** 암모니아 기준선 캘리브레이션
-- [ ] **[Phase 6]** 배뇨/배변 이벤트 감지 알고리즘
 - [ ] **[Phase 7]** 전력 관리 (Deep Sleep)
 
 ---
@@ -110,42 +119,44 @@ pet-toilet-monitor_v2/
 
 - **내장 LED**: GPIO15, Active-Low (LOW = ON, HIGH = OFF)
 - **Zigbee**: 802.15.4 네이티브 지원 (별도 모듈 불필요)
-- **ADC**: MQ-135 센서 연결 예정
+- **ADC**: GPIO0 (ADC1_CH0) ← MQ-135 AOUT 연결
 
 ### MQ-135 Air Quality Sensor
 
-- **인터페이스**: 아날로그 출력 → ESP32-C6 ADC
-- **측정 대상**: NH3, 벤젠, 알코올, 연기
-- **용도**: 암모니아 농도 변화로 배뇨 감지
+- **인터페이스**: 아날로그 출력 → GPIO0 (ADC1_CH0)
+- **측정 대상**: NH₃, 벤젠, 알코올, 연기
+- **용도**: 암모니아 농도 변화로 배뇨/배변 감지
 - **모니터링 주기**: 10초
+- **R0 (클린에어 저항)**: 44.7 kΩ (clean-air Rs ≈ 160.9 kΩ ÷ 3.6)
+- **전압 주의**: VCC=3.3V 구동 (5V 대비 감도 낮음), AOUT → ADC 직결 가능
 
 ---
 
 ## Zigbee 클러스터 구성
 
-### 현재 (Phase 4 완료 상태)
+| 클러스터 | ID | 역할 | 속성 | 용도 |
+|----------|--------|--------|------|------|
+| Basic | 0x0000 | Server | - | 제조사/모델 정보 |
+| Identify | 0x0003 | Server | - | 디바이스 식별 |
+| NH₃ Custom | 0xFC00 | Server | 0x0000: uint16 ppm | NH₃ 농도 (10초 주기) |
+| NH₃ Custom | 0xFC00 | Server | 0x0003: uint8 | 이벤트 타입 (변경 시만) |
+| On/Off | 0x0006 | Server | - | LED 원격 제어 |
 
-| 클러스터 | ID | 역할 | 용도 |
-|----------|--------|--------|------|
-| Basic | 0x0000 | Server | 제조사/모델 정보 |
-| Identify | 0x0003 | Server | 디바이스 식별 |
-| NH₃ Custom | 0xFC00 | Server | NH₃ ppm 직접 표현 (uint16, ppm) |
-| On/Off | 0x0006 | Server | LED 원격 제어 |
-
-- **Endpoint**: 1 (`HA_LITTERBOX_ENDPOINT`) - SmartThings는 endpoint 1을 기대함
+- **Endpoint**: 1 (`HA_LITTERBOX_ENDPOINT`) — SmartThings는 endpoint 1을 기대함
 - **Device ID**: `ESP_ZB_HA_CUSTOM_ATTR_DEVICE_ID`
 - **ZCL 문자열 포맷**: 길이 바이트 + 문자열 (예: `"\x06""Reasty"`)
 
-### ZCL 단위 변환
+---
 
-```
-NH₃ Custom (0xFC00):  uint16 = ppm (직접)          (50 ppm → 50)
-```
+## SmartThings Edge Driver
 
-### SmartThings Edge Driver (v12)
+### 현재 버전: v17
 
-`litterbox-driver/` 디렉토리에 위치. 배포 방법:
-```powershell
+`litterbox-driver/` 디렉토리에 위치.
+
+#### 배포 명령
+
+```bash
 # 패키징 (litterbox-driver/ 디렉토리에서)
 smartthings edge:drivers:package
 
@@ -153,19 +164,174 @@ smartthings edge:drivers:package
 smartthings edge:channels:assign <driverId> --channel <channelId>
 smartthings edge:drivers:install <driverId> --channel <channelId> --hub <hubId>
 
+# 드라이버 전환 (ID 직접 지정 권장)
+smartthings edge:drivers:switch <deviceId> --hub <hubId> --driver <driverId>
+
 # 로그 확인
 smartthings edge:drivers:logcat <driverId> --hub-address <hubIP>
 
-# 디바이스 삭제 / 드라이버 제거
-smartthings devices:delete <deviceId>
+# 드라이버 삭제
 smartthings edge:drivers:uninstall <driverId> --hub <hubId>
 ```
 
 #### 현재 SmartThings ID
-- **Device**: `e53f467e-54fb-434e-9a96-3d18f7ea299e`
-- **Driver (v12)**: `45c88770-8bb4-4771-bfb1-2b3641780b7e`
+
+- **Device**: `c25574ac-3eaf-41f2-8324-c078c15e3c7d`
+- **Driver (v17)**: `52e97c37-3b28-4352-aa4e-585c3626e603`
 - **Channel**: `30e3213f-f924-4f19-964c-fe44c2a09496`
 - **Hub**: `7a93da67-817b-4a20-ad71-f46e023a1992` (IP: `192.168.10.60`)
+
+---
+
+## SmartThings 커스텀 Capability
+
+### 개요
+
+빌트인 capability(tvocMeasurement, carbonMonoxideDetector 등)는 앱의 information 팝업 제목/설명이 고정되어 있어 커스터마이징 불가. 커스텀 capability를 생성하면 제목, 설명, enum 표시 텍스트를 자유롭게 설정할 수 있다.
+
+- **생성 비용**: 무료 (Samsung 계정만 필요)
+- **제한**: Works with SmartThings(WWST) 공식 인증 불가 (개인 DIY 프로젝트에는 무관)
+- **Namespace**: `streetsmile37673` (계정당 1개 자동 생성)
+
+### 등록된 커스텀 Capability
+
+#### 1. `streetsmile37673.nh3measurement` — 암모니아 농도
+
+| 항목 | 값 |
+|------|-----|
+| Capability ID | `streetsmile37673.nh3measurement` |
+| Version | 1 |
+| Attribute | `ammoniaLevel` (number, 0~1000 ppm) |
+| 앱 표시 레이블 | 암모니아(NH3) |
+| 앱 information 팝업 | 제목: 암모니아(NH3) / 내용: NH3 - 암모니아 |
+| 표시 타입 | slider (0~1000 ppm) + 기간별 차트 |
+
+**Lua 사용 예시**:
+```lua
+local nh3Measurement = capabilities["streetsmile37673.nh3measurement"]
+device:emit_event(nh3Measurement.ammoniaLevel({ value = ppm, unit = "ppm" }))
+```
+
+#### 2. `streetsmile37673.litterevent` — 배변 감지
+
+| 항목 | 값 |
+|------|-----|
+| Capability ID | `streetsmile37673.litterevent` |
+| Version | 1 |
+| Attribute | `litterEvent` (enum: none / urination / defecation) |
+| 앱 표시 레이블 | 배변 감지 |
+| 앱 information 팝업 | 제목: 배변 감지 / 내용: 배뇨/배변 이벤트 감지 |
+| idle 상태 | 감지 안 됨 |
+| 소변 감지 | 소변 감지됨 |
+| 대변 감지 | 대변 감지됨 |
+
+**Lua 사용 예시**:
+```lua
+local litterEvent = capabilities["streetsmile37673.litterevent"]
+device:emit_event(litterEvent.litterEvent({ value = "none" }))       -- 평상시
+device:emit_event(litterEvent.litterEvent({ value = "urination" }))  -- 소변
+device:emit_event(litterEvent.litterEvent({ value = "defecation" })) -- 대변
+```
+
+### 커스텀 Capability 등록 절차
+
+새 capability를 만들어야 할 때:
+
+```bash
+# 1. Capability 생성 (스키마 정의 JSON 필요)
+smartthings capabilities:create -i <schema.json> -j
+
+# 2. Presentation 생성 (앱 표시 방식 정의)
+smartthings capabilities:presentation:create <capId> <version> -i <presentation.json> -j
+
+# 3. 번역 등록 (한국어/영어)
+#    enum 타입의 값 번역은 i18n.value 하위에 map으로 작성
+smartthings capabilities:translations:upsert <capId> <version> -i <translation-ko.json> -j
+smartthings capabilities:translations:upsert <capId> <version> -i <translation-en.json> -j
+
+# 4. Namespace 확인
+smartthings capabilities:namespaces
+```
+
+**번역 파일 포맷 (enum 속성)**:
+```json
+{
+  "tag": "ko",
+  "label": "배변 감지",
+  "description": "배뇨/배변 이벤트 감지",
+  "attributes": {
+    "litterEvent": {
+      "label": "배변 감지",
+      "description": "화장실 사용 감지",
+      "displayTemplate": "{{device.label}} 상태: {{value}}",
+      "i18n": {
+        "value": {
+          "none": "감지 안 됨",
+          "urination": "소변 감지됨",
+          "defecation": "대변 감지됨"
+        }
+      }
+    }
+  },
+  "commands": {}
+}
+```
+
+> **주의**: enum 값의 번역 키는 `i18n.value.<enumKey>` 구조. `i18n.<enumKey>.label` (잘못된 형식) 이나 `"attributeName.enumKey"` 플랫 구조(잘못된 형식) 모두 422 에러 발생.
+
+### 커스텀 Capability 적용 (Edge Driver)
+
+**profiles/litterbox-v1.yaml**:
+```yaml
+components:
+  - id: main
+    capabilities:
+      - id: streetsmile37673.nh3measurement
+        version: 1
+      - id: streetsmile37673.litterevent
+        version: 1
+```
+
+**init.lua**:
+```lua
+local nh3Measurement = capabilities["streetsmile37673.nh3measurement"]
+local litterEvent    = capabilities["streetsmile37673.litterevent"]
+```
+
+> **주의**: `device_init`에서도 초기값을 emit해야 드라이버 전환 후 앱에 "-" 대신 정상 값이 표시됨.
+> `device_added`는 최초 페어링 시에만 호출되고, 드라이버 전환 시에는 `device_init`만 호출됨.
+
+---
+
+## 이벤트 감지 알고리즘 (Phase 6)
+
+### 3-state 상태 머신
+
+```
+IDLE ──(ppm > baseline + 10)──► ACTIVE ──(3연속 임계 이하)──► COOLDOWN ──(60s)──► IDLE
+```
+
+| 상태 | 설명 |
+|------|------|
+| IDLE | 평상시. EMA 기저선 업데이트 중 |
+| ACTIVE | 이벤트 진행 중. 피크/ticks 추적 |
+| COOLDOWN | 이벤트 종료 후 60초 대기 |
+
+### 이벤트 분류 기준
+
+- `peak_ticks ≤ 3` (30초 내 피크) **또는** `peak_ppm - baseline > 30 ppm` → **소변** (급격한 스파이크)
+- 그 외 → **대변** (완만한 상승)
+
+### 주요 상수 (`event_detector.h`)
+
+```c
+#define EVENT_TRIGGER_DELTA_PPM   10.0f  // 기저선 대비 상승 임계값
+#define EVENT_HYSTERESIS_PPM       3.0f  // 종료 판정 여유값
+#define EVENT_END_TICKS            3     // 연속 3회(30s) 임계 이하 → 종료
+#define EVENT_COOLDOWN_TICKS       6     // 종료 후 60s 쿨다운
+#define URINE_FAST_PEAK_TICKS      3     // 30s 내 피크 → 소변 판정
+#define BASELINE_ALPHA             0.05f // EMA 업데이트 계수 (~200초 시정수)
+```
 
 ---
 
@@ -173,109 +339,68 @@ smartthings edge:drivers:uninstall <driverId> --hub <hubId>
 
 ### 문제: SmartThings 앱에서 온도값이 NaN / null 표시
 
-**증상 (Phase 2 디버깅 중 발견)**:
-- 디바이스가 Zigbee 네트워크에 정상 참여
-- 펌웨어에서 온도 리포트 전송 시 ZCL Default Response status=0x00 (SUCCESS) 수신
-- 그러나 SmartThings 앱에서는 온도가 NaN으로 표시
-- Edge Driver logcat 출력이 **완전히 0** (startup 로그조차 없음)
-- 디바이스 provisioningState가 "TYPED"에서 "PROVISIONED"로 전환되지 않음
-- 커스텀 드라이버뿐 아니라 SmartThings 내장 드라이버(Zigbee Sensor)도 동일 증상
-
 **근본 원인**: `config.yaml`에 `permissions: zigbee: {}` 누락
 
-SmartThings Edge Driver의 `config.yaml`에 Zigbee 권한 선언이 없으면,
-허브가 **드라이버를 아예 시작하지 않는다**. 드라이버가 로딩되지 않으므로:
-- logcat 출력 0 (init.lua의 첫 줄 `log.info()` 조차 실행 안 됨)
-- lifecycle 이벤트(added, init, doConfigure)가 발생하지 않음
-- doConfigure가 실행되지 않으므로 provisioningState가 "TYPED"에 영원히 머무름
-- 허브가 Zigbee 메시지를 수신해도 드라이버로 라우팅하지 않음
+SmartThings Edge Driver의 `config.yaml`에 Zigbee 권한 선언이 없으면, 허브가 **드라이버를 아예 시작하지 않는다**. 에러 메시지도 없이 조용히 실패하므로 발견이 매우 어렵다.
 
-**해결 방법 (3가지 수정 사항)**:
-
-1. **`config.yaml`에 `permissions: zigbee: {}` 추가** (핵심 수정)
-   ```yaml
-   name: litterbox-driver-v9
-   packageKey: litterbox-driver-v9
-   permissions:
-     zigbee: {}          # 이 줄이 없으면 드라이버가 아예 로딩되지 않음!
-   description: SmartThings Edge Driver for LitterBox.v1
-   vendorSupportInformation: https://github.com/reasty/litterbox
-   ```
-
-2. **Endpoint 10 → 1 변경** (main.h)
-   - SmartThings Hub는 endpoint 1을 기대함
-   - 모든 동작 중인 Zigbee 디바이스(세탁기, 조명, 센서)가 endpoint 1 사용 확인
-
-3. **`defaults.register_for_default_handlers()` 추가** (init.lua)
-   - SmartThings 공식 드라이버 패턴에 따라 기본 핸들러 등록
-   - ZCL → SmartThings capability 매핑의 표준 인프라 초기화
-
-**참고한 문서 및 자료**:
-- [SmartThings Edge Driver 구조 문서](https://developer.smartthings.com/docs/devices/hub-connected/driver-components-and-structure) - `config.yaml` 필수 필드 확인
-- [SmartThings Edge Driver Lifecycle 문서](https://developer.smartthings.com/docs/edge-device-drivers/driver.html) - TYPED → PROVISIONED 전환 조건
-- [SmartThings Edge Device 문서](https://developer.smartthings.com/docs/edge-device-drivers/device.html) - provisioningState 설명
-- [SmartThings Zigbee Defaults 문서](https://developer.smartthings.com/docs/edge-device-drivers/zigbee/defaults.html) - `register_for_default_handlers` 사용법
-- [SmartThingsCommunity/SmartThingsEdgeDrivers GitHub](https://github.com/SmartThingsCommunity/SmartThingsEdgeDrivers) - 공식 드라이버 코드에서 `permissions: zigbee: {}` 패턴 확인
-- [SmartThings Community: Edge Drivers logcat/installation 이슈](https://community.smartthings.com/t/edge-drivers-issue-with-the-logcat-and-driver-installation/245215)
-- [SmartThings Community: doConfigure lifecycle 이슈](https://community.smartthings.com/t/st-edge-issue-with-the-doconfigure-lifecycle/238064)
-- [SmartThings Community: Zigbee fingerprint matching](https://community.smartthings.com/t/edge-zigbee-device-fingerprint-matching/278317)
-
-**디버깅 과정에서 시도한 것들** (v4 ~ v8, 모두 실패):
-- Edge Driver 코드를 최소화 (supported_capabilities만 남김) → 실패
-- 펌웨어에서 CO₂ 클러스터 제거하여 단순화 → 실패
-- Binding 기반 → Direct addressing (coordinator ep1) 전환 → Default Response SUCCESS 확인, but NaN
-- SmartThings 내장 드라이버로 전환 → 동일하게 실패
-- packageKey 변경으로 새 드라이버 ID 생성 (캐시 회피) → 실패
-- 디바이스 삭제 후 재페어링 → 실패
-
-**핵심 교훈**: SmartThings Edge Driver의 `config.yaml`에 `permissions: zigbee: {}`가
-없으면 드라이버가 로딩 자체가 안 된다. 에러 메시지도 없이 조용히 실패하므로 발견이 매우 어렵다.
+```yaml
+permissions:
+  zigbee: {}   # 필수! 없으면 드라이버 로딩 자체 안 됨
+```
 
 ---
 
 ### 문제: 커스텀 클러스터(0xFC00)에서 크래시 루프
 
-**증상 (Phase 4 디버깅 중 발견)**:
-- 펌웨어 플래시 후 디바이스가 네트워크 참여 직후 크래시 + 재부팅 반복
-- `Zigbee stack assertion failed zcl/zcl_general_commands.c:612`
-- 스택 덤프에 `0x0000040d` (이전 CO₂ 클러스터 ID) 포함
-
-**근본 원인 1**: `esp_zb_zcl_update_reporting_info()` for custom cluster (0xFC00)
-
-`esp_zb_zcl_update_reporting_info()`를 custom/manufacturer-specific cluster에 사용하면
-ZCL 내부 리포팅 타이머가 해당 클러스터를 처리하려다 crash. 커스텀 클러스터는
-ZCL 스택에 알려지지 않으므로 지원되지 않는다.
-
-**해결**: `esp_zb_zcl_update_reporting_info()` 완전히 제거. 대신 `esp_zb_scheduler_alarm()`으로
-수동 타이머를 만들어 `esp_zb_zcl_report_attr_cmd_req()`를 직접 호출.
+**근본 원인 1**: `esp_zb_zcl_update_reporting_info()`를 커스텀 클러스터에 사용하면 ZCL 스택 assertion crash.
 
 ```c
-/* ❌ 이렇게 하면 custom cluster에서 crash */
+/* ❌ 커스텀 클러스터에서 crash */
 // esp_zb_zcl_update_reporting_info(&reporting_info);
 
-/* ✅ 이렇게 수동으로 타이머 + 직접 리포트 */
+/* ✅ 수동 타이머 + 직접 리포트 */
 esp_zb_scheduler_alarm((esp_zb_callback_t)sensor_report_timer_cb, 0, INTERVAL_MS);
-// timer callback에서:
 esp_zb_zcl_report_attr_cmd_req(&nh3_report);
 ```
 
-**근본 원인 2**: NVS에 저장된 이전 클러스터(0x040D) 리포팅 설정
-
-Zigbee NVS(`zb_storage` 파티션)는 ZCL 리포팅 설정을 영속 저장한다. 클러스터를 변경하면
-이전 클러스터의 설정이 남아있고, 재부팅 시 존재하지 않는 클러스터를 처리하려다 crash.
-
-**해결**: esptool로 Zigbee NVS 파티션 초기화 후 재페어링
+**근본 원인 2**: NVS에 저장된 이전 클러스터 리포팅 설정이 남아 crash.
 
 ```powershell
-# partitions.csv에서 zb_storage(0xF1000, 0x5000) + zb_fct(0xF5000) 확인
+# 클러스터 ID 변경 시 반드시 Zigbee NVS 초기화
 & $esptool --port COM3 --baud 460800 erase_region 0xF1000 0x5000
-# 이후 디바이스가 factory-new 모드로 부팅 → SmartThings 앱에서 재페어링
 ```
 
-**핵심 교훈**:
-1. **커스텀 클러스터에 `esp_zb_zcl_update_reporting_info()` 절대 사용 금지** - crash 유발
-2. **클러스터 ID 변경 시 반드시 Zigbee NVS 초기화** - 잔류 설정이 crash 유발
-3. **재페어링 후 SmartThings가 fingerprint 불일치로 엉뚱한 드라이버 할당할 수 있음** → `smartthings edge:drivers:switch --include-non-matching` 사용
+---
+
+### 문제: Edge Driver 전환 후 logcat 출력 없음 / 디바이스 데이터 멈춤
+
+**현상**: `smartthings edge:drivers:switch` 후 logcat에 아무 출력도 없고 NH3 타임스탬프가 업데이트되지 않음.
+
+**원인**: 반복적인 드라이버 전환(특히 잘못된 드라이버로 전환)으로 Zigbee 디바이스가 허브와의 연결을 잃음.
+
+**해결**: SmartThings 앱에서 디바이스 삭제 후 재페어링.
+
+**예방**:
+- 드라이버 전환 시 반드시 `--driver <driverId>` 플래그로 ID를 직접 지정
+- `echo "숫자" | smartthings edge:drivers:switch` 방식은 목록 순서가 바뀔 수 있어 위험
+
+---
+
+### 문제: 커스텀 Capability 앱에서 "-" 표시
+
+**현상**: 드라이버 전환 후 커스텀 capability 값이 "-"로 표시됨.
+
+**원인**: `device_init`에서 초기값을 emit하지 않아 SmartThings 클라우드에 현재 값이 없음. (`device_added`는 최초 페어링 시에만 호출됨)
+
+**해결**: `device_init`에서도 초기 상태를 emit:
+```lua
+local function device_init(driver, device)
+  local ok, err = pcall(function()
+    device:emit_event(litterEvent.litterEvent({ value = "none" }))
+  end)
+  if not ok then log.error("device_init emit failed: " .. tostring(err)) end
+end
+```
 
 ---
 
@@ -291,13 +416,12 @@ Zigbee NVS(`zb_storage` 파티션)는 ZCL 리포팅 설정을 영속 저장한�
 
 ## 참조 예제
 
-본 프로젝트의 기반 코드:
-- `esp-zigbee-sdk/examples/esp_zigbee_HA_sample/HA_on_off_light` (Zigbee On/Off Light)
-- `esp-zigbee-sdk/examples/esp_zigbee_HA_sample/HA_temperature_sensor` (Temperature 클러스터 패턴)
-- `esp-zigbee-sdk/examples/common/zcl_utility` (제조사 정보 유틸리티)
+- `esp-zigbee-sdk/examples/esp_zigbee_HA_sample/HA_on_off_light`
+- `esp-zigbee-sdk/examples/esp_zigbee_HA_sample/HA_temperature_sensor`
+- `esp-zigbee-sdk/examples/common/zcl_utility`
 
 로컬 예제 경로: `D:\00Projects\ESP32\esp-zigbee-sdk\examples\`
 
 ---
 
-_Last Updated: 2026-02-19 (Phase 4 완료, 커스텀 NH₃ 클러스터 0xFC00 SmartThings 연동 검증)_
+_Last Updated: 2026-02-21 (Phase 6 완료, 커스텀 Capability 2종 적용, Edge Driver v17)_

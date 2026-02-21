@@ -1,5 +1,5 @@
 local log = require "log"
-log.info("=== LITTERBOX v14 LOADING ===")
+log.info("=== LITTERBOX v20 LOADING ===")
 
 local ZigbeeDriver = require "st.zigbee"
 local capabilities = require "st.capabilities"
@@ -11,67 +11,70 @@ local OnOff = zcl_clusters.OnOff
 -- Custom NH₃ Concentration Measurement cluster (0xFC00, Manufacturer-Specific)
 -- Attr 0x0000: uint16 ppm  — NH₃ concentration
 -- Attr 0x0003: uint8       — event type (0=none, 1=urination, 2=defecation)
-local NH3_CLUSTER_ID       = 0xFC00
+local NH3_CLUSTER_ID          = 0xFC00
 local NH3_MEASURED_VALUE_ATTR = 0x0000
-local NH3_EVENT_TYPE_ATTR  = 0x0003
+local NH3_EVENT_TYPE_ATTR     = 0x0003
 
-log.info("=== LITTERBOX v14 modules loaded ===")
+-- Custom capabilities
+local nh3Measurement = capabilities["streetsmile37673.nh3measurement"]
+local toiletEvent    = capabilities["streetsmile37673.toiletevent"]
 
--- NH₃ handler: uint16 ppm → tvocMeasurement capability
+log.info(string.format("=== LITTERBOX v20 capabilities: nh3=%s, toilet=%s ===",
+  tostring(nh3Measurement), tostring(toiletEvent)))
+
+-- NH₃ handler: uint16 ppm → nh3Measurement custom capability
 local function nh3_attr_handler(driver, device, value, zb_rx)
   local ppm = value.value  -- uint16, already in ppm
   log.info(string.format("NH3: %d ppm (cluster 0x%04X)", ppm, NH3_CLUSTER_ID))
-  device:emit_event(capabilities.tvocMeasurement.tvocLevel({
+  device:emit_event(nh3Measurement.ammoniaLevel({
     value = ppm,
     unit = "ppm"
   }))
 end
 
--- Event type handler: uint8 → carbonMonoxideDetector capability
--- 0 = no event  → carbonMonoxide.clear()  (맑음)
--- 1 = urination → carbonMonoxide.detected()
--- 2 = defecation → carbonMonoxide.detected()
+-- Event type handler: uint8 → toiletEvent custom capability
+-- 0 = no event  → toiletEvent("none")
+-- 1 = urination → toiletEvent("urination")
+-- 2 = defecation → toiletEvent("defecation")
 local function event_type_attr_handler(driver, device, value, zb_rx)
   local event_type = value.value  -- uint8
-  local event_names = { [0] = "NONE", [1] = "URINATION", [2] = "DEFECATION" }
-  log.info(string.format("EventType: %d (%s)", event_type, event_names[event_type] or "UNKNOWN"))
-
-  if event_type == 0 then
-    device:emit_event(capabilities.carbonMonoxideDetector.carbonMonoxide.clear())
-  else
-    device:emit_event(capabilities.carbonMonoxideDetector.carbonMonoxide.detected())
-    if event_type == 1 then
-      log.info("EVENT: URINATION detected → CO detected")
-    elseif event_type == 2 then
-      log.info("EVENT: DEFECATION detected → CO detected")
-    end
-  end
+  local event_names = { [0] = "none", [1] = "urination", [2] = "defecation" }
+  local event_name = event_names[event_type] or "none"
+  log.info(string.format("EventType: %d → toiletEvent(%s)", event_type, event_name))
+  device:emit_event(toiletEvent.toiletEvent({ value = event_name }))
 end
 
 -- Lifecycle: device added
 local function device_added(driver, device)
-  log.info("=== LITTERBOX v14 device_added ===")
-  device:emit_event(capabilities.tvocMeasurement.tvocLevel({ value = 0, unit = "ppm" }))
-  device:emit_event(capabilities.carbonMonoxideDetector.carbonMonoxide.clear())
+  log.info("=== LITTERBOX v20 device_added ===")
+  device:emit_event(nh3Measurement.ammoniaLevel({ value = 0, unit = "ppm" }))
+  device:emit_event(toiletEvent.toiletEvent({ value = "none" }))
   device:emit_event(capabilities.switch.switch.off())
 end
 
 -- Lifecycle: device init
 local function device_init(driver, device)
-  log.info("=== LITTERBOX v14 device_init ===")
+  log.info("=== LITTERBOX v20 device_init ===")
+  -- Emit initial state so the app doesn't show "-" after driver switch
+  local ok, err = pcall(function()
+    device:emit_event(toiletEvent.toiletEvent({ value = "none" }))
+  end)
+  if not ok then
+    log.error("device_init toiletEvent emit failed: " .. tostring(err))
+  end
 end
 
 -- Lifecycle: doConfigure
 local function do_configure(driver, device)
-  log.info("=== LITTERBOX v14 do_configure ===")
+  log.info("=== LITTERBOX v20 do_configure ===")
   device:configure()
-  log.info("=== LITTERBOX v14 configure done ===")
+  log.info("=== LITTERBOX v20 configure done ===")
 end
 
 local driver_template = {
   supported_capabilities = {
-    capabilities.tvocMeasurement,
-    capabilities.carbonMonoxideDetector,
+    nh3Measurement,
+    toiletEvent,
     capabilities.switch,
   },
   zigbee_handlers = {
@@ -83,8 +86,8 @@ local driver_template = {
     }
   },
   lifecycle_handlers = {
-    added = device_added,
-    init = device_init,
+    added   = device_added,
+    init    = device_init,
     doConfigure = do_configure,
   },
   health_check = false,
@@ -94,5 +97,5 @@ defaults.register_for_default_handlers(driver_template, driver_template.supporte
 
 local litterbox_driver = ZigbeeDriver("litterbox", driver_template)
 
-log.info("=== LITTERBOX v14 driver created, calling run ===")
+log.info("=== LITTERBOX v20 driver created, calling run ===")
 litterbox_driver:run()

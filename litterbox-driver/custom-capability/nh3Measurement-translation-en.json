@@ -1,0 +1,14 @@
+{
+  "tag": "en",
+  "label": "Ammonia (NH₃)",
+  "description": "NH₃ - Ammonia",
+  "attributes": {
+    "ammoniaLevel": {
+      "label": "Ammonia Level",
+      "description": "NH₃ - Ammonia concentration",
+      "displayTemplate": "The ammonia level of {{device.label}} is {{value}}",
+      "i18n": {}
+    }
+  },
+  "commands": {}
+}

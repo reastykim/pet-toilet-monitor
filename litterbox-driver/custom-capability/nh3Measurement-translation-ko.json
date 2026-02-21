@@ -1,0 +1,14 @@
+{
+  "tag": "ko",
+  "label": "암모니아(NH₃)",
+  "description": "NH₃ - 암모니아",
+  "attributes": {
+    "ammoniaLevel": {
+      "label": "암모니아 농도",
+      "description": "NH₃ - 암모니아 농도",
+      "displayTemplate": "{{device.label}}의 암모니아 농도는 {{value}}입니다",
+      "i18n": {}
+    }
+  },
+  "commands": {}
+}
