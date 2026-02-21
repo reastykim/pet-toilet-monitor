@@ -35,14 +35,17 @@ Phase 3: 센서 데이터 SmartThings 연동 (CO₂ 클러스터 매핑) ✅ 완
 Phase 4: 커스텀 NH₃ Zigbee 클러스터 검증         ✅ 완료
     └─ 제조사 특화 클러스터(0xFC00) → Edge Driver v12 → SmartThings 실시간 모니터링
 
-Phase 5: MQ-135 실제 센서 통합                    ← 현재
-    └─ ADC 읽기 → 실제 NH₃ ppm 값 → Zigbee 전송
+Phase 5: MQ-135 실제 센서 통합                    ✅ 완료
+    └─ ADC Oneshot API → MQ-135 NH₃ ppm → Zigbee 전송 → SmartThings 실시간 표시
 
-Phase 6: 배뇨/배변 이벤트 감지 로직
-    └─ 암모니아 패턴 분석 → 이벤트 분류 → SmartThings 알림
+Phase 6: 배뇨/배변 이벤트 감지 로직              ✅ 완료
+    └─ 3-state 상태 머신(IDLE→ACTIVE→COOLDOWN) → 배뇨/배변 분류 → SmartThings 알림
 
-Phase 7: 마무리 & 최적화
-    └─ 전력 관리, 코드 정리, 문서화
+Phase 6.5: 커스텀 SmartThings Capability          ✅ 완료
+    └─ streetsmile37673.nh3measurement / .toiletevent → Edge Driver v20
+
+Phase 7: 마무리 & 최적화                          ← 현재
+    └─ LED 상태 표시, 코드 정리, 안정성 강화
 ```
 
 ---
@@ -413,7 +416,7 @@ esp_err_t air_sensor_read(air_sensor_data_t *data);
 
 ### 5-3. MQ-135 드라이버 (`air_sensor_driver_MQ135.c`)
 
-- [ ] ADC1 초기화 (Oneshot API, ESP-IDF v5.5.2)
+- [x] ADC1 초기화 (Oneshot API, ESP-IDF v5.5.2)
 
   ```c
   // 참고: https://docs.espressif.com/projects/esp-idf/en/v5.5.2/esp32c6/api-reference/peripherals/adc_oneshot.html
@@ -430,7 +433,7 @@ esp_err_t air_sensor_read(air_sensor_data_t *data);
   adc_oneshot_config_channel(adc_handle, ADC_CHANNEL_0, &config);
   ```
 
-- [ ] ADC 값 → ppm 변환 함수 구현 (MQ-135 감도 곡선 기반)
+- [x] ADC 값 → ppm 변환 함수 구현 (MQ-135 감도 곡선 기반)
   ```c
   // MQ-135 NH₃ 감도 곡선 근사 (캘리브레이션 필요)
   // Rs/Ro 비율 → ppm 변환
@@ -442,22 +445,19 @@ esp_err_t air_sensor_read(air_sensor_data_t *data);
       return 102.2f * powf(ratio, -2.473f);
   }
   ```
-- [ ] 웜업 대기 시간 처리 (MQ-135: 최소 20초)
-- [ ] `air_sensor_read()` 함수 완성
+- [x] 웜업 대기 시간 처리 (MQ-135: 최소 20초)
+- [x] `air_sensor_read()` 함수 완성
 
 ### 5-4. 센서 데이터 Zigbee 전송 통합
 
-- [ ] `main.c`에서 10초 타이머로 `air_sensor_read()` 호출
-- [ ] 읽은 NH₃ ppm을 커스텀 NH₃ Cluster(0xFC00)로 전송 (Phase 4에서 구축된 파이프라인 활용)
-- [ ] 시리얼 로그로 ppm 값 확인
-  ```
-  I (xxx) LitterBox: NH3: 15 ppm (raw ADC: 2048)
-  ```
-- [ ] SmartThings 앱에서 실시간 값 변화 확인
+- [x] `main.c`에서 10초 타이머로 `air_sensor_read()` 호출
+- [x] 읽은 NH₃ ppm을 커스텀 NH₃ Cluster(0xFC00)로 전송 (Phase 4에서 구축된 파이프라인 활용)
+- [x] 시리얼 로그로 ppm 값 확인
+- [x] SmartThings 앱에서 실시간 값 변화 확인
 
 ### 5-5. MQ-135 캘리브레이션
 
-- [ ] 신선한 공기에서 R0 측정 (20분 이상 안정화 후)
+- [ ] 신선한 공기에서 R0 측정 (20분 이상 안정화 후) ← 실환경 테스트 필요
 - [ ] `R0_NH3` 상수 코드에 적용
 - [ ] 암모니아 발생 환경(화장실 근처)에서 값 변화 확인
 
@@ -491,7 +491,7 @@ project/
 │   └── event_detector.h
 ```
 
-- [ ] `event_detector.h` — 이벤트 타입 정의
+- [x] `event_detector.h` — 이벤트 타입 정의
 
   ```c
   typedef enum {
@@ -511,15 +511,35 @@ project/
   litter_event_t event_detector_update(event_context_t *ctx, float new_ppm);
   ```
 
-- [ ] `event_detector.c` — 상승률/패턴 기반 분류 로직 구현
-- [ ] 이벤트 발생 시 SmartThings에 별도 Attribute로 전송 검토
+- [x] `event_detector.c` — 3-state 상태 머신 구현 (IDLE/ACTIVE/COOLDOWN)
+  - EMA 기저선 추적 (α=0.05, ~200초 시정수)
+  - 배뇨: peak_ticks ≤ 3 또는 peak_delta > 30 ppm
+  - 배변: 완만한 상승 (peak_ticks > 3)
+- [x] 이벤트 발생 시 NH₃ 클러스터 attr 0x0003(uint8)으로 전송
 
 ### 6-3. SmartThings 알림 연동
 
-- [ ] SmartThings Automation으로 이벤트 감지 시 앱 알림 설정
-- [ ] Edge Driver에 이벤트 Attribute 핸들러 추가
+- [x] Edge Driver attr 0x0003 핸들러 추가 → `streetsmile37673.toiletevent` emit
+- [x] SmartThings 앱에서 "소변 감지됨" / "대변 감지됨" 표시 확인
 
 **✅ Phase 6 완료 조건**: 실제 화장실 사용 시 배뇨/배변 이벤트가 SmartThings 앱 알림으로 수신됨
+
+---
+
+## Phase 6.5: 커스텀 SmartThings Capability
+
+**목표**: 빌트인 capability(tvocMeasurement, carbonMonoxideDetector)를 제품 전용 커스텀 capability로 교체하여 앱 표시 정보를 정확하게 표현
+
+### 구현 내용
+
+- [x] `streetsmile37673.nh3measurement` — NH₃ 농도 (number, 0~1000 ppm)
+  - 슬라이더 UI, 한/영 번역, NH₃ 유니코드 첨자(₃) 적용
+- [x] `streetsmile37673.toiletevent` — 화장실 사용 이벤트 (enum: none/urination/defecation)
+  - 번역: 감지 안 됨 / 소변 감지됨 / 대변 감지됨
+- [x] Edge Driver v20: 두 커스텀 capability + switch
+- [x] 제품 리브랜딩: 고양이 전용 → 반려동물 범용 ("Smart Pet Toilet Monitor")
+
+**✅ Phase 6.5 완료 조건**: SmartThings 앱에서 "암모니아(NH₃)" / "배변 감지" 표시 확인
 
 ---
 
@@ -617,5 +637,5 @@ tvocMeasurement.tvocLevel: ppm = uint16 (변환 불필요)
 ---
 
 _작성일: 2026-02-18_
-_최종 업데이트: 2026-02-19 (Phase 4 완료)_
-_버전: v1.1_
+_최종 업데이트: 2026-02-21 (Phase 6.5 완료, Phase 7 진행 중)_
+_버전: v1.3_
