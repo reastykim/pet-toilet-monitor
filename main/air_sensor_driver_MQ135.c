@@ -71,12 +71,11 @@ static const char *TAG = "MQ135";
 #define MQ135_NH3_CURVE_B   (-2.473f)
 
 /* ── R0: clean-air reference resistance (kΩ) ────────────────────────── */
-/* Initial estimate for 5 V operation. Must be recalibrated:
- *   power on outdoors 20+ min, read raw from log, then:
+/* Calibrated 2026-02-23 @ 5 V + 100kΩ:100kΩ divider, window open (~30 min warmup):
+ *   avg raw=953 (n=6), V_adc=0.768V, AOUT=1.536V, Rs=22.55kΩ, R0=Rs/3.6=6.3kΩ
  *   V_adc = raw/4095 × 3.3,  AOUT = V_adc × 2.0
- *   Rs = RL × (5.0 − AOUT) / AOUT,  R0 = Rs / 3.6
- * Typical range at 5 V: 8~20 kΩ */
-#define MQ135_R0_KOHM       10.0f
+ *   Rs = RL × (5.0 − AOUT) / AOUT,  R0 = Rs / 3.6 */
+#define MQ135_R0_KOHM       6.3f
 
 /* ── Output clamp ───────────────────────────────────────────────────── */
 #define MQ135_PPM_MAX       1000

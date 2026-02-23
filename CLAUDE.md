@@ -102,7 +102,7 @@ pet-toilet-monitor_v2/
 - [x] SmartThings Hub 페어링 성공 (Endpoint 1)
 - [x] 커스텀 NH₃ 클러스터 (0xFC00, uint16 ppm) 구현
 - [x] On/Off 클러스터 유지 (LED 원격 제어)
-- [x] **[Phase 5]** MQ-135 ADC 통합 (R0=10.0kΩ 임시, 5V 재캘리브레이션 필요, 10초 주기 리포트)
+- [x] **[Phase 5]** MQ-135 ADC 통합 (R0=6.3kΩ 캘리브레이션 완료 2026-02-23, 5V+분배기, 10초 주기 리포트)
 - [x] **[Phase 6]** 배뇨/배변 이벤트 감지 상태 머신 (IDLE/ACTIVE/COOLDOWN)
 - [x] attr 0x0003 (uint8): 이벤트 타입 전송 (0=없음, 1=소변, 2=대변)
 - [x] SmartThings 커스텀 Capability 2종 등록 및 적용 (v20 드라이버)
@@ -129,7 +129,7 @@ pet-toilet-monitor_v2/
 - **모니터링 주기**: 10초
 - **전원**: VCC = **5V (VBUS)** — 3.3V 구동 시 감도 부족 확인 (2026-02-22)
 - **배선**: AOUT → 100kΩ → GPIO0, 분기점 100kΩ → GND (최대 2.5V ADC 입력)
-- **R0**: 10.0 kΩ (임시값, 5V 환경 재캘리브레이션 필요)
+- **R0**: 6.3 kΩ (캘리브레이션 완료 2026-02-23, 창문 열린 실내 ~30분 예열, avg raw=953)
 
 ---
 
