@@ -13,7 +13,7 @@
       "label": "암모니아(NH₃)",
       "displayType": "slider",
       "slider": {
-        "range": [0, 1000],
+        "range": [0, 100],
         "unit": "ammoniaLevel.unit",
         "value": "ammoniaLevel.value",
         "valueType": "number"
@@ -29,7 +29,7 @@
           "value": "ammoniaLevel.value",
           "valueType": "number",
           "unit": "ammoniaLevel.unit",
-          "range": [0, 1000]
+          "range": [0, 100]
         }
       }
     ],
