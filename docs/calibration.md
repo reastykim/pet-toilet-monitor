@@ -1,9 +1,9 @@
 # MQ-135 캘리브레이션 절차 및 테스트 계획
 
 > **대상 파일**: `main/air_sensor_driver_MQ135.c`
-> **수정 상수**: `MQ135_R0_KOHM` (현재 임시값: 10.0 kΩ)
-> **현재 상태**: 5V + 100kΩ:100kΩ 분배기 구성으로 전환. R0 재캘리브레이션 필요.
-> **전환 이유**: 3.3V 구동 시 소변 모래 덩어리 테스트에서 2 ppm 이하로 이벤트 감지 불가 확인 (2026-02-22)
+> **수정 상수**: `MQ135_R0_KOHM`
+> **현재 상태**: 캘리브레이션 완료 — R0 = **6.3 kΩ** (2026-02-23)
+> **배선**: 5V(VBUS) + 100kΩ:100kΩ 전압 분배기 → GPIO0 (ADC1_CH0)
 
 ---
 
@@ -17,134 +17,183 @@ NH₃ ppm = 102.2 × (Rs / R0)^(-2.473)
 ```
 
 R0가 틀리면 ppm 값 전체가 비례적으로 왜곡된다.
-예를 들어 실제 R0가 30 kΩ인데 44.7 kΩ으로 설정하면 NH₃ 농도가 실제보다 ~2배 과대 추정된다.
 
-현재 드라이버의 R0 계산식 (5V + 분배기 기준):
+현재 드라이버의 R0 계산식 (5V + 100kΩ:100kΩ 분배기 기준):
 
 ```
-V_adc        = raw / 4095 × 3.3          ← ADC가 읽은 전압 (분배기 출력)
-AOUT_sensor  = V_adc × 2.0               ← 분배기 이전 실제 AOUT
-Rs_clean_air = RL × (VCC − AOUT) / AOUT  ← VCC = 5.0V
+V_adc        = raw / 4095 × 3.3           ← ADC가 읽은 전압 (분배기 출력)
+AOUT_sensor  = V_adc × 2.0                ← 분배기 이전 실제 AOUT
+Rs_clean_air = RL × (VCC − AOUT) / AOUT  ← VCC = 5.0V, RL = 10kΩ
 R0           = Rs_clean_air / 3.6         ← 3.6: MQ-135 데이터시트 clean-air 비율
 ```
 
 ---
 
-## 2. 준비물
+## 2. R0의 본질 — 센서 개체차 vs 환경
+
+### 핵심 결론
+
+**R0는 환경이 아닌 개별 센서의 물리적 특성값이다.**
+
+### 변동 원인
+
+| 변동 원인 | 영향 크기 | 설명 |
+|-----------|----------|------|
+| **센서 개체차** | **매우 큼** | 반도체 산화물 층 두께/밀도 편차. 같은 로트에서도 ±20~30% 차이. MQ-135 데이터시트 Rs 범위: 10kΩ~200kΩ |
+| **공급 전압** | 큼 | 히터 온도 변화 → 감지층 온도 → R0 변화. 3.3V에서 5V로 전환 시 재캘리브레이션 필수 |
+| **노화** | 중간 (느림) | 수년에 걸쳐 서서히 드리프트 |
+| 온도/습도 | 작음 | Rs에 일시적으로 영향. R0 자체는 거의 영향 없음 |
+
+→ **같은 제품을 100개 만들면 R0가 100개 다 다르다.**
+
+### 이 제품에서 R0 오차의 실제 영향
+
+이벤트 감지 로직(`event_detector.c`)은 절대 ppm 값이 아닌 **상대 변화량(delta)**으로 동작한다:
+
+```c
+// 이벤트 트리거 조건
+if (ppm > baseline + EVENT_TRIGGER_DELTA_PPM)   // 절대값 X, 상대 변화량 O
+```
+
+EMA(지수이동평균) baseline이 각 센서의 "현재 평상시" 수준에 자동으로 적응하므로,
+R0가 다소 틀려도 **이벤트 감지 자체는 정상 동작**한다.
+
+| R0 오차의 영향 | 결과 |
+|---------------|------|
+| 앱에 표시되는 NH₃ ppm 절대값 | 오차 발생 (R0 오류에 비례) |
+| 이벤트 트리거 (baseline+10ppm) | **정상 동작** — baseline이 자동 적응 |
+
+### 상용 제품 관점: 고객 캘리브레이션이 필요한가?
+
+| 접근법 | 장점 | 단점 | 적합성 |
+|--------|------|------|--------|
+| **R0 고정값 사용** | 생산 단순, 비용 없음 | ppm 절대값 ±20~30% 오차 | **이 제품에 충분** — 이벤트 감지 목적 |
+| **EOL 캘리브레이션** | 정확한 ppm 표시 | 클린룸 챔버, 자동화 지그, 생산 공정 추가 | 정량 ppm 보장이 필요한 산업용·의료용 |
+| **사용자 캘리브레이션** | 배포 환경 반영 | UX 나쁨, 사용자 오류 가능성 높음 | 비권장 |
+
+**결론**: 이 제품은 이벤트 감지가 핵심 기능이고 EMA baseline이 센서 개체차를 자동 보상하므로,
+**고객 캘리브레이션 불필요**, EOL 캘리브레이션도 선택사항이다.
+앱에서 ppm을 표시할 경우 "참고값"으로 안내하는 것으로 충분하다.
+
+---
+
+## 3. 준비물
 
 | 항목 | 사양 | 비고 |
 |------|------|------|
 | 디바이스 | XIAO ESP32-C6 + MQ-135 **5V + 분배기 배선 완료** | 5V→VCC, AOUT→100kΩ→GPIO0, 분기→100kΩ→GND |
-| 환경 | 신선한 실외 공기 | 주방·화장실·주차장 제외 |
+| 환경 | 신선한 실외 공기 또는 창문 열린 실내 | 주방·화장실·주차장 제외 |
 | 시간 | 최소 30분 | 20분 웜업 + 10분 안정화 측정 |
-| 도구 | 시리얼 모니터 (ESP-IDF `idf.py monitor` 또는 PuTTY) | raw_adc, Rs 값 읽기 |
+| 도구 | 시리얼 모니터 (`idf.py monitor` 또는 PuTTY) | raw_adc 값 읽기 |
 | 선택 | 멀티미터 | AOUT 전압 직접 확인 |
 
 ---
 
-## 3. R0 측정 절차 (Step-by-Step)
+## 4. R0 측정 절차 (Step-by-Step)
 
-### Step 1. 로그 레벨을 DEBUG로 변경
+### Step 1. 신선한 공기에서 부팅
 
-`sdkconfig` 또는 `build.ps1` 실행 전에 시리얼 로그 레벨 확인.
-`air_sensor_driver_MQ135.c`의 `ESP_LOGD`가 출력되려면 `MQ135` 태그의 로그 레벨이 DEBUG여야 한다.
-
-```
-idf.py menuconfig
-  → Component config → Log output → Default log verbosity → Debug
-```
-
-또는 런타임에서:
-```c
-esp_log_level_set("MQ135", ESP_LOG_DEBUG);
-```
-
-### Step 2. 신선한 실외에서 부팅
-
-- 디바이스를 실외(베란다, 창문 밖 등)로 이동
+- 창문을 열거나 실외(베란다 등)로 이동
 - USB 연결 후 `idf.py monitor` 실행
-- 부팅 후 웜업 로그 확인:
+- 부팅 후 초기화 로그 확인:
   ```
-  I MQ135: MQ-135 initialized on GPIO0 (ADC1_CH0), R0=44.7 kΩ, warmup 20000 ms
+  I MQ135: MQ-135 initialized on GPIO0 (ADC1_CH0), VCC=5.0V divider=2.0 R0=6.3 kΩ, warmup 20000 ms
   ```
 
-### Step 3. 20분 대기 (웜업)
+### Step 2. 30분 대기 (웜업 + 안정화)
 
 - 웜업 중에는 `[WARMUP]` 태그가 붙은 로그 출력
 - **웜업 완료 전 데이터는 무시**
 
 ```
-D MQ135: raw=240 V=0.193 Rs=159.2kΩ Rs/R0=3.56 NH3=52.1ppm [WARMUP]
+I LITTERBOX: Sensor warming up (raw=961), NH3=4.6 ppm (unreliable) [WARMUP]
 ```
 
-### Step 4. 안정화 데이터 수집 (10분)
+### Step 3. 안정화 데이터 수집
 
-웜업 완료 후 `[WARMUP]` 태그가 사라지면 10분간 raw_adc 값을 기록한다.
-
-```
-D MQ135: raw=312 V=0.251 Rs=121.8kΩ Rs/R0=2.72 NH3=18.3ppm
-D MQ135: raw=318 V=0.256 Rs=119.5kΩ Rs/R0=2.67 NH3=17.8ppm
-D MQ135: raw=310 V=0.250 Rs=122.2kΩ Rs/R0=2.73 NH3=18.5ppm
-```
-
-60초마다 10회 이상 수집하여 **평균 raw_adc** 계산.
-
-### Step 5. R0 계산
-
-평균 raw_adc로 R0를 계산한다:
+웜업 완료 후 10분간 (최소 6회 이상) raw 값을 기록한다.
 
 ```
-VCC  = 3.3 V
-RL   = 10 kΩ
-raw  = 측정 평균값 (예: 315)
+I LITTERBOX: Reported NH3=4 ppm (4.6 ppm_f, baseline=4.6, raw=961)
+I LITTERBOX: Reported NH3=4 ppm (4.9 ppm_f, baseline=4.7, raw=986)
+I LITTERBOX: Reported NH3=4 ppm (4.3 ppm_f, baseline=4.6, raw=949)
+```
 
-V    = raw / 4095 × 3.3  =  315 / 4095 × 3.3  =  0.254 V
-Rs   = RL × (VCC - V) / V  =  10 × (3.3 - 0.254) / 0.254  =  119.9 kΩ
-R0   = Rs / 3.6  =  119.9 / 3.6  =  33.3 kΩ
+스파이크(평균 ±10% 초과)는 제외하고 평균 raw_adc를 계산한다.
+
+### Step 4. R0 계산
+
+**계산식 (5V + 100kΩ:100kΩ 분배기 기준):**
+
+```
+raw  = 953  (측정 평균값 예시)
+
+V_adc = raw / 4095 × 3.3  =  953 / 4095 × 3.3  =  0.768 V
+AOUT  = V_adc × 2.0        =  0.768 × 2.0        =  1.536 V
+Rs    = 10 × (5.0 - 1.536) / 1.536              =  22.55 kΩ
+R0    = Rs / 3.6            =  22.55 / 3.6        =  6.3 kΩ
 ```
 
 **계산기 (Python 스크립트):**
 
 ```python
-raw_avg = 315          # 측정 평균값 입력
-VCC = 3.3
-RL  = 10.0
-V   = raw_avg / 4095.0 * VCC
-Rs  = RL * (VCC - V) / V
-R0  = Rs / 3.6
-print(f"V = {V:.3f} V")
-print(f"Rs = {Rs:.2f} kΩ")
-print(f"R0 = {R0:.2f} kΩ  ← 이 값을 MQ135_R0_KOHM에 입력")
+raw_avg       = 953     # 측정 평균값 입력
+VCC           = 5.0     # 센서 공급 전압 (V)
+RL            = 10.0    # 모듈 내장 부하 저항 (kΩ)
+DIVIDER_RATIO = 2.0     # 100kΩ:100kΩ 분배기
+
+V_adc = raw_avg / 4095.0 * 3.3
+AOUT  = V_adc * DIVIDER_RATIO
+Rs    = RL * (VCC - AOUT) / AOUT
+R0    = Rs / 3.6
+print(f"V_adc = {V_adc:.3f} V")
+print(f"AOUT  = {AOUT:.3f} V")
+print(f"Rs    = {Rs:.2f} kΩ")
+print(f"R0    = {R0:.2f} kΩ  ← 이 값을 MQ135_R0_KOHM에 입력")
 ```
 
-### Step 6. 코드 반영 및 재빌드
+### Step 5. 코드 반영 및 재빌드
 
 `main/air_sensor_driver_MQ135.c` 수정:
 
 ```c
-/* 기존 */
-#define MQ135_R0_KOHM   44.7f
-
-/* 측정값으로 교체 (예: 33.3) */
-#define MQ135_R0_KOHM   33.3f
+#define MQ135_R0_KOHM   6.3f   /* 측정값으로 교체 */
 ```
 
 `build.ps1` 실행 후 플래시:
 
 ```powershell
 powershell.exe -ExecutionPolicy Bypass -File build.ps1
+powershell.exe -ExecutionPolicy Bypass -File flash.ps1
 ```
 
-### Step 7. 재측정으로 검증
+### Step 6. 재측정으로 검증
 
-신선한 공기에서 재부팅 후 NH₃ ppm이 **0~5 ppm** 범위에 수렴하는지 확인.
-실내 공기 기준으로 5~20 ppm이면 정상 범위.
+신선한 공기에서 재부팅 후 NH₃ ppm이 **0~8 ppm** 범위에 수렴하는지 확인.
+(완전한 실외 깨끗한 공기: 1~4 ppm, 창문 열린 실내: 4~8 ppm 정상)
 
 ---
 
-## 4. 이벤트 감지 테스트 계획
+## 5. 측정 결과 기록표
 
-### 4-1. 인위적 NH₃ 자극 테스트 (실내)
+| 항목 | 값 |
+|------|-----|
+| 측정 일시 | 2026-02-23 |
+| 측정 환경 | 실내, 창문 열림, 예열 ~30분 |
+| 평균 raw_adc | 953 (n=6, 스파이크 1개 제외) |
+| V_adc | 0.768 V |
+| AOUT | 1.536 V |
+| Rs (clean air) | 22.55 kΩ |
+| **R0** | **6.3 kΩ** |
+| 캘리브레이션 후 NH₃ (신선한 공기) | 4~5 ppm |
+| 이벤트 트리거 기준 | baseline(≈4~5 ppm) + 10 ppm = **14~15 ppm** |
+| 펌웨어 반영 날짜 | 2026-02-23 |
+
+---
+
+## 6. 이벤트 감지 테스트 계획
+
+### 6-1. 인위적 NH₃ 자극 테스트 (실내)
 
 캘리브레이션 완료 후, 이벤트 감지 로직(event_detector)이 올바르게 동작하는지 확인한다.
 
@@ -156,7 +205,7 @@ powershell.exe -ExecutionPolicy Bypass -File build.ps1
 
 | 단계 | 행동 | 기대 결과 |
 |------|------|-----------|
-| T+0s | 디바이스 정상 동작 확인 (IDLE 상태) | `D DETECTOR: state=IDLE baseline=X.Xppm` |
+| T+0s | 디바이스 정상 동작 확인 (IDLE 상태) | `DETECTOR: state=IDLE baseline=X.Xppm` |
 | T+30s | NH₃ 발생원을 센서 5cm 앞에 접근 | ppm 급상승 → `ACTIVE` 전환 |
 | T+40s | 발생원 제거 | ppm 감소 시작 |
 | T+2min | 자연 감쇠 대기 | `COOLDOWN` 전환 + 이벤트 분류 로그 |
@@ -165,18 +214,18 @@ powershell.exe -ExecutionPolicy Bypass -File build.ps1
 **예상 시리얼 로그:**
 
 ```
-D DETECTOR: state=IDLE    baseline=8.2ppm  ppm=9.1
-D DETECTOR: state=ACTIVE  baseline=8.2ppm  ppm=31.7  ticks=1
-D DETECTOR: state=ACTIVE  baseline=8.2ppm  ppm=48.3  peak=48.3ppm  ticks=2
-D DETECTOR: state=ACTIVE  baseline=8.2ppm  ppm=22.1  ticks=3
-D DETECTOR: state=ACTIVE  baseline=8.2ppm  ppm=11.4  below=1  ticks=4
-D DETECTOR: state=ACTIVE  baseline=8.2ppm  ppm=10.2  below=2  ticks=5
-D DETECTOR: state=ACTIVE  baseline=8.2ppm  ppm=9.3   below=3  ticks=6
-I DETECTOR: EVENT=URINATION  peak=48.3ppm  peak_ticks=2  delta=40.1ppm
-D DETECTOR: state=COOLDOWN  cooldown_ticks=1/6
+DETECTOR: state=IDLE    baseline=4.6ppm  ppm=4.8
+DETECTOR: state=ACTIVE  baseline=4.6ppm  ppm=22.4  ticks=1
+DETECTOR: state=ACTIVE  baseline=4.6ppm  ppm=38.1  peak=38.1ppm  ticks=2
+DETECTOR: state=ACTIVE  baseline=4.6ppm  ppm=15.3  ticks=3
+DETECTOR: state=ACTIVE  baseline=4.6ppm  ppm=8.2   below=1  ticks=4
+DETECTOR: state=ACTIVE  baseline=4.6ppm  ppm=6.9   below=2  ticks=5
+DETECTOR: state=ACTIVE  baseline=4.6ppm  ppm=5.1   below=3  ticks=6
+DETECTOR: EVENT=URINATION  peak=38.1ppm  peak_ticks=2  delta=33.5ppm
+DETECTOR: state=COOLDOWN  cooldown_ticks=1/6
 ```
 
-### 4-2. 배변 패턴 시뮬레이션 테스트
+### 6-2. 배변 패턴 시뮬레이션 테스트
 
 발생원을 서서히 접근시켜 완만한 상승 패턴을 만든다.
 
@@ -187,10 +236,10 @@ D DETECTOR: state=COOLDOWN  cooldown_ticks=1/6
 | T+3min | 감지 결과 확인 |
 
 **판정 기준:**
-- peak_ticks > 3 이면 → `DEFECATION` (대변 감지됨)
-- peak_ticks ≤ 3 이면 → `URINATION` (소변 감지됨)
+- `peak_ticks > 3` → `DEFECATION` (대변 감지됨)
+- `peak_ticks ≤ 3` → `URINATION` (소변 감지됨)
 
-### 4-3. 실제 화장실 테스트
+### 6-3. 실제 화장실 테스트
 
 | 항목 | 내용 |
 |------|------|
@@ -201,7 +250,7 @@ D DETECTOR: state=COOLDOWN  cooldown_ticks=1/6
 
 ---
 
-## 5. 이벤트 감지 파라미터 튜닝
+## 7. 이벤트 감지 파라미터 튜닝
 
 실환경 테스트 결과에 따라 `event_detector.h`의 상수를 조정한다.
 
@@ -216,21 +265,4 @@ D DETECTOR: state=COOLDOWN  cooldown_ticks=1/6
 
 ---
 
-## 6. 측정 결과 기록표
-
-캘리브레이션 완료 후 아래 표를 채워서 `CLAUDE.md`에 기록한다.
-
-| 항목 | 값 |
-|------|-----|
-| 측정 일시 | |
-| 측정 환경 | |
-| 평균 raw_adc | |
-| 측정 전압 (V) | |
-| Rs (kΩ) | |
-| **R0 (kΩ)** | |
-| 신선한 공기 NH₃ (ppm) | |
-| 펌웨어 반영 날짜 | |
-
----
-
-_작성일: 2026-02-21_
+_최초 작성: 2026-02-21 / 최종 업데이트: 2026-02-23 (R0 캘리브레이션 완료, 개체차 분석 추가)_
