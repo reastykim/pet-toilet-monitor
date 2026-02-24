@@ -107,9 +107,17 @@ pet-toilet-monitor_v2/
 - [x] attr 0x0003 (uint8): 이벤트 타입 전송 (0=없음, 1=소변, 2=대변)
 - [x] SmartThings 커스텀 Capability 2종 등록 및 적용 (v20 드라이버)
 
+### Phase 7 진행 중 (이벤트 감지 튜닝)
+
+- [x] **[Phase 7.1]** ADC 샘플링 주기 단축: 10초 → **2초** (Zigbee 보고는 10초 유지)
+  - 실제 소변 테스트(2026-02-24)에서 미감지 확인 → 원인: 10초 샘플링이 짧은 NH₃ 스파이크를 놓침
+  - `SENSOR_SAMPLE_INTERVAL_MS=2000`, `SENSOR_REPORT_TICKS=5` 추가
+  - `sensor_report_timer_cb` → `sensor_sample_timer_cb` (tick 카운터 기반 보고 게이팅)
+
 ### 미완료 (다음 Phase)
 
-- [ ] **[Phase 7]** 전력 관리 (Deep Sleep)
+- [ ] **[Phase 7.2]** 트리거 임계값 튜닝 (`EVENT_TRIGGER_DELTA_PPM`) — 실제 이벤트 데이터 수집 후 결정
+- [ ] **[Phase 7.x]** 전력 관리 (Deep Sleep)
 
 ---
 
@@ -425,4 +433,4 @@ end
 
 ---
 
-_Last Updated: 2026-02-21 (Phase 6 완료, 커스텀 Capability 2종 적용, Edge Driver v17)_
+_Last Updated: 2026-02-24 (Phase 7.1 완료: ADC 샘플링 2초로 단축)_
