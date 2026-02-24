@@ -26,6 +26,7 @@ static const char *TAG = "LITTERBOX";
 /* Event detection state — persists across timer callbacks */
 static event_detector_t g_detector;
 static litter_event_t   g_last_reported_event = LITTER_EVENT_NONE;
+static uint8_t          g_sample_tick = 0;  /* Counts 2s samples; report every SENSOR_REPORT_TICKS */
 
 /********************* Deferred driver init **********************/
 
@@ -46,25 +47,29 @@ static esp_err_t deferred_driver_init(void)
 
 /********************* Sensor report timer ***********************/
 
-static void sensor_report_timer_cb(uint8_t param)
+static void sensor_sample_timer_cb(uint8_t param)
 {
     /* Read NH₃ concentration from MQ-135 sensor */
     air_sensor_data_t sensor = {0};
-    uint16_t nh3_ppm;
-
-    float ppm_f = 0.0f;   /* float ppm for event detector (higher precision) */
+    uint16_t nh3_ppm = NH3_DEFAULT_PPM;
+    float ppm_f = 0.0f;
 
     if (air_sensor_read(&sensor) == ESP_OK && sensor.is_valid) {
         nh3_ppm = sensor.nh3_ppm;
         ppm_f   = sensor.nh3_ppm_f;
-        if (sensor.is_warming_up) {
+    } else {
+        ESP_LOGW(TAG, "Sensor read failed — reporting fallback: %u ppm", nh3_ppm);
+    }
+
+    /* Determine whether this tick should also send a Zigbee NH₃ ppm report */
+    g_sample_tick++;
+    bool do_report = (g_sample_tick >= SENSOR_REPORT_TICKS);
+    if (do_report) {
+        g_sample_tick = 0;
+        if (sensor.is_valid && sensor.is_warming_up) {
             ESP_LOGI(TAG, "Sensor warming up (raw=%"PRIu32"), NH3=%.1f ppm (unreliable)",
                      sensor.raw_adc, (double)ppm_f);
         }
-    } else {
-        nh3_ppm = NH3_DEFAULT_PPM;
-        ppm_f   = 0.0f;
-        ESP_LOGW(TAG, "Sensor read failed — reporting fallback: %u ppm", nh3_ppm);
     }
 
     /* Run event detection state machine with float ppm (outside lock — pure computation) */
@@ -73,23 +78,25 @@ static void sensor_report_timer_cb(uint8_t param)
 
     esp_zb_lock_acquire(portMAX_DELAY);
 
-    /* --- NH₃ ppm Report (custom cluster 0xFC00, attr 0x0000) --- */
-    esp_zb_zcl_set_attribute_val(
-        HA_LITTERBOX_ENDPOINT,
-        NH3_CUSTOM_CLUSTER_ID,
-        ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
-        NH3_ATTR_MEASURED_VALUE_ID,
-        &nh3_ppm, false);
+    /* --- NH₃ ppm Report (custom cluster 0xFC00, attr 0x0000) — every SENSOR_REPORT_TICKS ticks --- */
+    if (do_report) {
+        esp_zb_zcl_set_attribute_val(
+            HA_LITTERBOX_ENDPOINT,
+            NH3_CUSTOM_CLUSTER_ID,
+            ESP_ZB_ZCL_CLUSTER_SERVER_ROLE,
+            NH3_ATTR_MEASURED_VALUE_ID,
+            &nh3_ppm, false);
 
-    esp_zb_zcl_report_attr_cmd_t nh3_report = {0};
-    nh3_report.address_mode = ESP_ZB_APS_ADDR_MODE_16_ENDP_PRESENT;
-    nh3_report.attributeID = NH3_ATTR_MEASURED_VALUE_ID;
-    nh3_report.direction = ESP_ZB_ZCL_CMD_DIRECTION_TO_CLI;
-    nh3_report.clusterID = NH3_CUSTOM_CLUSTER_ID;
-    nh3_report.zcl_basic_cmd.src_endpoint = HA_LITTERBOX_ENDPOINT;
-    nh3_report.zcl_basic_cmd.dst_addr_u.addr_short = 0x0000;
-    nh3_report.zcl_basic_cmd.dst_endpoint = 1;
-    esp_zb_zcl_report_attr_cmd_req(&nh3_report);
+        esp_zb_zcl_report_attr_cmd_t nh3_report = {0};
+        nh3_report.address_mode = ESP_ZB_APS_ADDR_MODE_16_ENDP_PRESENT;
+        nh3_report.attributeID = NH3_ATTR_MEASURED_VALUE_ID;
+        nh3_report.direction = ESP_ZB_ZCL_CMD_DIRECTION_TO_CLI;
+        nh3_report.clusterID = NH3_CUSTOM_CLUSTER_ID;
+        nh3_report.zcl_basic_cmd.src_endpoint = HA_LITTERBOX_ENDPOINT;
+        nh3_report.zcl_basic_cmd.dst_addr_u.addr_short = 0x0000;
+        nh3_report.zcl_basic_cmd.dst_endpoint = 1;
+        esp_zb_zcl_report_attr_cmd_req(&nh3_report);
+    }
 
     /* --- Event Type Report (attr 0x0003) — only when event changes --- */
     if (event_changed) {
@@ -114,8 +121,10 @@ static void sensor_report_timer_cb(uint8_t param)
 
     esp_zb_lock_release();
 
-    ESP_LOGI(TAG, "Reported NH3=%u ppm (%.1f ppm_f, baseline=%.1f, raw=%"PRIu32")",
-             nh3_ppm, (double)ppm_f, event_detector_get_baseline(&g_detector), sensor.raw_adc);
+    if (do_report) {
+        ESP_LOGI(TAG, "Reported NH3=%u ppm (%.1f ppm_f, baseline=%.1f, raw=%"PRIu32")",
+                 nh3_ppm, (double)ppm_f, event_detector_get_baseline(&g_detector), sensor.raw_adc);
+    }
 
     if (event_changed) {
         g_last_reported_event = new_event;
@@ -123,8 +132,8 @@ static void sensor_report_timer_cb(uint8_t param)
         ESP_LOGI(TAG, "Event type changed → %s (%u)", event_names[new_event], (unsigned)new_event);
     }
 
-    /* Re-schedule */
-    esp_zb_scheduler_alarm((esp_zb_callback_t)sensor_report_timer_cb, 0, SENSOR_REPORT_INTERVAL_MS);
+    /* Re-schedule at sample interval (2 s) */
+    esp_zb_scheduler_alarm((esp_zb_callback_t)sensor_sample_timer_cb, 0, SENSOR_SAMPLE_INTERVAL_MS);
 }
 
 /********************* Zigbee signal handler **********************/
@@ -154,7 +163,7 @@ void esp_zb_app_signal_handler(esp_zb_app_signal_t *signal_struct)
                 esp_zb_bdb_start_top_level_commissioning(ESP_ZB_BDB_MODE_NETWORK_STEERING);
             } else {
                 ESP_LOGI(TAG, "Device rebooted, already on network - starting reports");
-                esp_zb_scheduler_alarm((esp_zb_callback_t)sensor_report_timer_cb, 0, SENSOR_REPORT_INTERVAL_MS);
+                esp_zb_scheduler_alarm((esp_zb_callback_t)sensor_sample_timer_cb, 0, SENSOR_SAMPLE_INTERVAL_MS);
             }
         } else {
             ESP_LOGW(TAG, "%s failed with status: %s, retrying", esp_zb_zdo_signal_to_string(sig_type),
@@ -172,8 +181,9 @@ void esp_zb_app_signal_handler(esp_zb_app_signal_t *signal_struct)
                      extended_pan_id[3], extended_pan_id[2], extended_pan_id[1], extended_pan_id[0],
                      esp_zb_get_pan_id(), esp_zb_get_current_channel(), esp_zb_get_short_address());
             /* Start sensor reporting NOW (after joining network) */
-            esp_zb_scheduler_alarm((esp_zb_callback_t)sensor_report_timer_cb, 0, SENSOR_REPORT_INTERVAL_MS);
-            ESP_LOGI(TAG, "Sensor report timer started (interval: %d ms)", SENSOR_REPORT_INTERVAL_MS);
+            esp_zb_scheduler_alarm((esp_zb_callback_t)sensor_sample_timer_cb, 0, SENSOR_SAMPLE_INTERVAL_MS);
+            ESP_LOGI(TAG, "Sensor sample timer started (sample: %d ms, report: %d ms)",
+                     SENSOR_SAMPLE_INTERVAL_MS, SENSOR_REPORT_INTERVAL_MS);
         } else {
             ESP_LOGI(TAG, "Network steering was not successful (status: %s)", esp_err_to_name(err_status));
             esp_zb_scheduler_alarm((esp_zb_callback_t)bdb_start_top_level_commissioning_cb, ESP_ZB_BDB_MODE_NETWORK_STEERING, 1000);

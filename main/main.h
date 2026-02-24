@@ -39,8 +39,10 @@
 #define NH3_MIN_PPM                     0
 #define NH3_MAX_PPM                     1000
 
-/* Sensor report interval */
-#define SENSOR_REPORT_INTERVAL_MS       10000   /* Report interval: 10 seconds */
+/* Sensor timing */
+#define SENSOR_SAMPLE_INTERVAL_MS       2000    /* ADC read + event detection: 2 seconds */
+#define SENSOR_REPORT_INTERVAL_MS       10000   /* Zigbee NH₃ ppm report: 10 seconds */
+#define SENSOR_REPORT_TICKS             (SENSOR_REPORT_INTERVAL_MS / SENSOR_SAMPLE_INTERVAL_MS) /* = 5 */
 
 #define ESP_ZB_ZED_CONFIG()                                         \
     {                                                               \

@@ -1,7 +1,3 @@
-param(
-    [string]$Port = "COM3"
-)
-
 $ErrorActionPreference = "Continue"
 
 $env:IDF_PATH = "C:\Espressif\frameworks\esp-idf-v5.5.2"
@@ -24,20 +20,9 @@ $toolPaths = @(
 Get-ChildItem "C:\Espressif\tools\riscv32-esp-elf" -Directory | ForEach-Object {
     $toolPaths += "$($_.FullName)\riscv32-esp-elf\bin"
 }
-Get-ChildItem "C:\Espressif\tools\riscv32-esp-elf-gdb" -Directory | ForEach-Object {
-    $toolPaths += "$($_.FullName)\riscv32-esp-elf-gdb\bin"
-}
-Get-ChildItem "C:\Espressif\tools\esp-rom-elfs" -Directory | ForEach-Object {
-    $toolPaths += $_.FullName
-}
 $env:PATH = ($toolPaths -join ";") + ";" + $env:PATH
 
 Set-Location "D:\00Projects\ESP32\pet-toilet-monitor_v2"
 
-"=== Flashing to $Port ==="
-& $IDF_PYTHON "$env:IDF_PATH\tools\idf.py" -p $Port flash 2>&1
-if ($LASTEXITCODE -ne 0) {
-    "ERROR: Flash failed with code $LASTEXITCODE"
-    exit 1
-}
-"=== Flash completed successfully ==="
+"=== Flashing to COM3 ==="
+& $IDF_PYTHON "$env:IDF_PATH\tools\idf.py" -p COM3 flash 2>&1
