@@ -43,13 +43,13 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    LitterBox.v1 디바이스                      │
+│                    LitterBox.v1 디바이스                     │
 │                                                             │
-│   MQ-135 센서  ─── 전압분배기(100kΩ×2) ─── XIAO ESP32-C6   │
+│   MQ-135 센서  ─── 전압분배기(100kΩ×2) ─── XIAO ESP32-C6     │
 │   (5V, NH₃)              ↓                                  │
 │                      ADC 읽기 (2초)                          │
 │                      EMA 기저선 추적                         │
-│                      이벤트 감지 상태 머신                   │
+│                      이벤트 감지 상태 머신                    │
 │                           ↓                                 │
 │                  Zigbee 3.0 (802.15.4)                      │
 └─────────────────────────────┬───────────────────────────────┘
@@ -100,13 +100,13 @@ XIAO ESP32-C6                         MQ-135 모듈
 ```
                       USB-C
                        ┌──────┐
-    GPIO0/A0/D0/ADC1 ┤●    ●├ 5V  ← MQ-135 VCC
-    GPIO1/A1/D1      ┤●    ●├ GND ← MQ-135 GND
-    GPIO2/A2/D2      ┤●    ●├ 3V3
-    GPIO21/D3        ┤●    ●├ D10/MOSI/GPIO18
-    GPIO22/SDA/D4    ┤●    ●├ D9/MISO/GPIO20
-    GPIO23/SCL/D5    ┤●    ●├ D8/SCK/GPIO19
-    GPIO16/TX/D6     ┤●    ●├ D7/RX/GPIO17
+      GPIO0/A0/D0/ADC1 ┤●    ●├ 5V  ← MQ-135 VCC
+      GPIO1/A1/D1      ┤●    ●├ GND ← MQ-135 GND
+      GPIO2/A2/D2      ┤●    ●├ 3V3
+      GPIO21/D3        ┤●    ●├ D10/MOSI/GPIO18
+      GPIO22/SDA/D4    ┤●    ●├ D9/MISO/GPIO20
+      GPIO23/SCL/D5    ┤●    ●├ D8/SCK/GPIO19
+      GPIO16/TX/D6     ┤●    ●├ D7/RX/GPIO17
                        └──────┘
 GPIO15: 온보드 LED (Active-Low)
 ```
