@@ -5,6 +5,10 @@
 > 노령묘의 배뇨/배변 감지를 목표로 시작한 개인 스터디 프로젝트.
 > 암모니아 센서 단독 방식의 한계를 실측으로 확인하고 마무리함.
 
+<img src="https://github.com/user-attachments/assets/979ae931-a5a7-4841-87ab-cbb636dd3fdd" width="408" height="306"/>
+
+<img src="https://github.com/user-attachments/assets/05f27337-0fd6-4df0-86a0-567638a6b577" width="216" height="468"/>
+
 ---
 
 ## 목차
